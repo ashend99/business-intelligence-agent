@@ -9,7 +9,7 @@
 set -e
 
 AGENT_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHONPATH="$AGENT_HOME:$PYTHONPATH"
+PYTHONPATH="$AGENT_HOME/src:$PYTHONPATH"
 
 export AGENT_HOME
 echo "AGENT_HOME: $AGENT_HOME"

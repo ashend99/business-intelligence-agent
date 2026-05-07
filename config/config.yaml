@@ -1,0 +1,32 @@
+app:
+  title: "Business Intelligence Agent"
+  log_level: "INFO"
+
+llm:
+  model: "gpt-4o"
+  temperature: 0.0
+  max_tokens: 2048
+
+embeddings:
+  model: "text-embedding-3-small"
+
+vectorstore:
+  persist_dir: "./vectorstore/chroma_db"
+  collections:
+    cafe: "cafe_restaurant"
+    hotel: "airport_hotel"
+    gems: "gem_business"
+
+ingestion:
+  docs_dir: "./docs"
+  chunk_size: 1000
+  chunk_overlap: 150
+  supported_extensions:
+    - ".pdf"
+    - ".docx"
+    - ".xlsx"
+    - ".csv"
+    - ".txt"
+
+retrieval:
+  top_k: 5

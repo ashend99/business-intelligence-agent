@@ -53,40 +53,48 @@ agentic-ai/
 │
 ├── app.py                  # Streamlit entry point
 │
-├── agent/
-│   ├── __init__.py
-│   ├── graph.py            # LangGraph agent graph (nodes + edges)
-│   └── prompts.py          # System prompts
+├── src/
+│   ├── agent/
+│   │   ├── __init__.py
+│   │   ├── graph.py            # LangGraph agent graph (nodes + edges)
+│   │   └── prompts.py          # System prompts
+│   │
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   └── rag_tool.py         # RAG retrieval tool (first tool)
+│   │   # future: social_media_tool.py, sales_tool.py, etc.
+│   │
+│   ├── ingestion/
+│   │   ├── __init__.py
+│   │   ├── loader.py           # Load PDF, DOCX, XLSX, CSV, TXT
+│   │   ├── splitter.py         # Chunk documents
+│   │   └── indexer.py          # Embed + store in ChromaDB
+│   │
+│   ├── memory/
+│   │   ├── __init__.py
+│   │   └── session_memory.py   # LangChain session chat history
+│   │
+│   └── config/
+│       ├── __init__.py
+│       └── settings.py         # Loads API key from .env + config.yaml
 │
-├── tools/
-│   ├── __init__.py
-│   └── rag_tool.py         # RAG retrieval tool (first tool)
-│   # future: social_media_tool.py, sales_tool.py, etc.
-│
-├── ingestion/
-│   ├── __init__.py
-│   ├── loader.py           # Load PDF, DOCX, XLSX, CSV, TXT
-│   ├── splitter.py         # Chunk documents
-│   └── indexer.py          # Embed + store in ChromaDB
-│
-├── memory/
-│   ├── __init__.py
-│   └── session_memory.py   # LangChain session chat history
+├── config/
+│   └── config.yaml             # Non-secret config (models, paths, chunking)
 │
 ├── vectorstore/
-│   └── chroma_db/          # ChromaDB persisted data (gitignored)
+│   └── chroma_db/              # ChromaDB persisted data (gitignored)
 │
-├── docs/                   # Drop documents here for batch ingestion
+├── docs/                       # Drop documents here for batch ingestion
 │   ├── cafe/
 │   ├── hotel/
 │   └── gems/
 │
-├── config/
-│   └── settings.py         # API keys, model names, paths (via .env)
-│
 ├── .env                    # Secrets (gitignored)
+├── .env.example
 ├── .gitignore
-└── requirements.txt
+├── pyproject.toml
+├── sourceme.sh
+└── uv.lock
 ```
 
 ---
