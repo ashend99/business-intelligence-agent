@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "business-intelligence-agent"
+version = "0.1.0"
+description = "Agentic AI chatbot for multi-business intelligence and data retrieval"
+requires-python = ">=3.11"
+
+dependencies = [
+    # LangChain ecosystem
+    "langchain>=0.3",
+    "langchain-openai>=0.3",
+    "langchain-community>=0.3",
+    "langgraph>=0.3",
+
+    # OpenAI
+    "openai>=1.0",
+
+    # Vector store
+    "chromadb>=0.6",
+
+    # UI
+    "streamlit>=1.40",
+
+    # Document loaders
+    "pypdf>=5.0",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "pandas>=2.0",
+    "unstructured>=0.16",
+
+    # Config
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ipykernel",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*", "tools*", "ingestion*", "memory*", "config*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
