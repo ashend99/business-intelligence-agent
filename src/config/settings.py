@@ -1,6 +1,6 @@
 """
 Module: src/config/settings.py
-Date: 2024-06-01
+Date: 2026-05-07
 
 Loads all application configuration from two sources:
   - .env file        → secrets (OPENAI_API_KEY)

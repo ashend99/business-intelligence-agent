@@ -1,5 +1,6 @@
 """
-ingestion/loader.py
+Module: ingestion/loader.py
+Date: 2026-05-08
 
 Loads documents from the filesystem into LangChain Document objects.
 
