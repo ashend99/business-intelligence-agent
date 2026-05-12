@@ -1,4 +1,4 @@
-"""
+﻿"""
 tests/ingestion/test_indexer.py
 
 Test suite for ingestion/indexer.py covering:
@@ -12,10 +12,9 @@ Test suite for ingestion/indexer.py covering:
     ├── Happy path — valid keys map to correct collection names
     └── Error case — unknown key raises KeyError
 
-    get_or_create_collection()
-    ├── Returns a ChromaDB Collection object
-    ├── Creates collection if it does not exist
-    └── Error case — unknown business key
+    get_collection_count()
+    ├── Returns 0 for an empty collection
+    └── Error case — unknown business key raises KeyError
 
     index_documents()
     ├── Happy path — returns correct count, calls upsert
@@ -28,11 +27,12 @@ Test suite for ingestion/indexer.py covering:
     └── Error case — unknown business key
 
 All OpenAI embedding calls are mocked to avoid real network traffic.
-ChromaDB uses an in-memory client (not PersistentClient) in all tests.
+ChromaDB uses a PersistentClient in a temp directory via ChromaDBManager.
+The factory get_vector_db() is patched to return this isolated manager.
 """
 
 import hashlib
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import chromadb
 import pytest
@@ -42,9 +42,10 @@ from ingestion.indexer import (
     _make_chunk_id,
     _resolve_collection_name,
     clear_collection,
-    get_or_create_collection,
+    get_collection_count,
     index_documents,
 )
+from ingestion.vectordb import ChromaDBManager
 
 
 # ---------------------------------------------------------------------------
@@ -64,28 +65,26 @@ def fake_vectors(texts: list[str]) -> list[list[float]]:
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture: in-memory ChromaDB + mocked embedder
+# Shared fixtures
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def mock_chroma(monkeypatch, tmp_path):
+def chroma_manager(monkeypatch, tmp_path):
     """
-    Replace _get_chroma_client() with a PersistentClient in a unique temp
-    directory so each test gets a completely isolated ChromaDB instance.
-    EphemeralClient has global in-process state and leaks between tests.
+    Build a ChromaDBManager backed by a PersistentClient in a unique temp
+    directory, then patch get_vector_db() so that indexer.py uses it.
+    Each test gets a completely isolated ChromaDB instance.
     """
-    client = chromadb.PersistentClient(path=str(tmp_path / "chroma"))
+    manager = ChromaDBManager.__new__(ChromaDBManager)
+    manager._client = chromadb.PersistentClient(path=str(tmp_path / "chroma"))
 
-    monkeypatch.setattr("ingestion.indexer._get_chroma_client", lambda: client)
-    return client
+    monkeypatch.setattr("ingestion.indexer.get_vector_db", lambda: manager)
+    return manager
 
 
 @pytest.fixture()
 def mock_embedder(monkeypatch):
-    """
-    Replace _get_embedder() with a mock that returns fake vectors.
-    This avoids real OpenAI API calls.
-    """
+    """Replace _get_embedder() with a mock that returns fake vectors."""
     embedder = MagicMock()
     embedder.embed_documents.side_effect = fake_vectors
     monkeypatch.setattr("ingestion.indexer._get_embedder", lambda: embedder)
@@ -152,36 +151,22 @@ class TestResolveCollectionName:
 
 
 # ===========================================================================
-# get_or_create_collection()
+# get_collection_count()
 # ===========================================================================
 
-class TestGetOrCreateCollection:
+class TestGetCollectionCount:
 
-    def test_returns_collection_object(self, mock_chroma):
-        col = get_or_create_collection("cafe")
-        assert col is not None
-        assert hasattr(col, "upsert")
+    def test_returns_zero_for_empty_collection(self, chroma_manager):
+        count = get_collection_count("cafe")
+        assert count == 0
 
-    def test_collection_name_matches_config(self, mock_chroma):
-        col = get_or_create_collection("cafe")
-        assert col.name == "cafe_restaurant"
-
-    def test_hotel_collection_name(self, mock_chroma):
-        col = get_or_create_collection("hotel")
-        assert col.name == "airport_hotel"
-
-    def test_gems_collection_name(self, mock_chroma):
-        col = get_or_create_collection("gems")
-        assert col.name == "gem_business"
-
-    def test_calling_twice_returns_same_collection(self, mock_chroma):
-        col1 = get_or_create_collection("cafe")
-        col2 = get_or_create_collection("cafe")
-        assert col1.name == col2.name
-
-    def test_unknown_key_raises_key_error(self, mock_chroma):
+    def test_unknown_key_raises_key_error(self, chroma_manager):
         with pytest.raises(KeyError):
-            get_or_create_collection("unknown_business")
+            get_collection_count("unknown_business")
+
+    def test_hotel_and_gems_available(self, chroma_manager):
+        assert get_collection_count("hotel") == 0
+        assert get_collection_count("gems") == 0
 
 
 # ===========================================================================
@@ -190,51 +175,48 @@ class TestGetOrCreateCollection:
 
 class TestIndexDocuments:
 
-    def test_returns_correct_chunk_count(self, mock_chroma, mock_embedder):
+    def test_returns_correct_chunk_count(self, chroma_manager, mock_embedder):
         docs = [make_doc(f"chunk {i}", chunk_id=i) for i in range(5)]
         result = index_documents(docs, "cafe")
         assert result == 5
 
-    def test_embed_documents_called_with_correct_texts(self, mock_chroma, mock_embedder):
+    def test_embed_documents_called_with_correct_texts(self, chroma_manager, mock_embedder):
         docs = [make_doc("text one", chunk_id=0), make_doc("text two", chunk_id=1)]
         index_documents(docs, "cafe")
         mock_embedder.embed_documents.assert_called_once_with(
             ["text one", "text two"]
         )
 
-    def test_chunks_are_stored_in_collection(self, mock_chroma, mock_embedder):
+    def test_chunks_are_stored_in_collection(self, chroma_manager, mock_embedder):
         docs = [make_doc(f"content {i}", source="sales.txt", chunk_id=i) for i in range(3)]
         index_documents(docs, "cafe")
-        col = mock_chroma.get_collection("cafe_restaurant")
-        assert col.count() == 3
+        assert get_collection_count("cafe") == 3
 
-    def test_metadata_is_preserved_in_collection(self, mock_chroma, mock_embedder):
+    def test_metadata_is_preserved_in_collection(self, chroma_manager, mock_embedder):
         doc = make_doc("important data", source="hotel_report.txt", chunk_id=0)
         index_documents([doc], "hotel")
-        col = mock_chroma.get_collection("airport_hotel")
+        col = chroma_manager._client.get_collection("airport_hotel")
         result = col.get(include=["metadatas"])
         assert result["metadatas"][0]["source"] == "hotel_report.txt"
 
-    def test_is_idempotent_on_same_documents(self, mock_chroma, mock_embedder):
+    def test_is_idempotent_on_same_documents(self, chroma_manager, mock_embedder):
         docs = [make_doc(f"chunk {i}", source="gems.txt", chunk_id=i) for i in range(4)]
         index_documents(docs, "gems")
         index_documents(docs, "gems")  # index again — should not duplicate
-        col = mock_chroma.get_collection("gem_business")
-        assert col.count() == 4  # still 4, not 8
+        assert get_collection_count("gems") == 4  # still 4, not 8
 
-    def test_different_sources_accumulate_correctly(self, mock_chroma, mock_embedder):
+    def test_different_sources_accumulate_correctly(self, chroma_manager, mock_embedder):
         docs_a = [make_doc(f"doc_a chunk {i}", source="file_a.txt", chunk_id=i) for i in range(2)]
         docs_b = [make_doc(f"doc_b chunk {i}", source="file_b.txt", chunk_id=i) for i in range(3)]
         index_documents(docs_a, "cafe")
         index_documents(docs_b, "cafe")
-        col = mock_chroma.get_collection("cafe_restaurant")
-        assert col.count() == 5
+        assert get_collection_count("cafe") == 5
 
-    def test_empty_docs_raises_value_error(self, mock_chroma, mock_embedder):
+    def test_empty_docs_raises_value_error(self, chroma_manager, mock_embedder):
         with pytest.raises(ValueError, match="docs must not be empty"):
             index_documents([], "cafe")
 
-    def test_unknown_business_key_raises_key_error(self, mock_chroma, mock_embedder):
+    def test_unknown_business_key_raises_key_error(self, chroma_manager, mock_embedder):
         docs = [make_doc("some text")]
         with pytest.raises(KeyError):
             index_documents(docs, "unknown_key")
@@ -246,26 +228,23 @@ class TestIndexDocuments:
 
 class TestClearCollection:
 
-    def test_collection_is_empty_after_clear(self, mock_chroma, mock_embedder):
+    def test_collection_is_empty_after_clear(self, chroma_manager, mock_embedder):
         docs = [make_doc(f"chunk {i}", chunk_id=i) for i in range(5)]
         index_documents(docs, "cafe")
-        col = mock_chroma.get_collection("cafe_restaurant")
-        assert col.count() == 5
+        assert get_collection_count("cafe") == 5
 
         clear_collection("cafe")
 
-        col = mock_chroma.get_collection("cafe_restaurant")
-        assert col.count() == 0
+        assert get_collection_count("cafe") == 0
 
-    def test_can_index_after_clear(self, mock_chroma, mock_embedder):
+    def test_can_index_after_clear(self, chroma_manager, mock_embedder):
         docs = [make_doc(f"chunk {i}", chunk_id=i) for i in range(3)]
         index_documents(docs, "hotel")
         clear_collection("hotel")
         new_docs = [make_doc("fresh data", chunk_id=0)]
         index_documents(new_docs, "hotel")
-        col = mock_chroma.get_collection("airport_hotel")
-        assert col.count() == 1
+        assert get_collection_count("hotel") == 1
 
-    def test_unknown_key_raises_key_error(self, mock_chroma):
+    def test_unknown_key_raises_key_error(self, chroma_manager):
         with pytest.raises(KeyError):
             clear_collection("nonexistent")

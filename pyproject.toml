@@ -34,6 +34,9 @@ dependencies = [
     "pandas>=2.0",
     "unstructured>=0.16",
 
+    # Reranking
+    "flashrank>=0.2",
+
     # Config
     "python-dotenv>=1.0",
     "pyyaml>=6.0",

@@ -72,6 +72,7 @@ class Settings:
 
         # --- Vector store ---
         vs = cfg.get("vectorstore", {})
+        self.vectorstore_provider: str = vs.get("provider", "chroma")
         self.chroma_persist_dir: Path = Path(PROJECT_ROOT) / vs.get(
             "persist_dir", "./vectorstore/chroma_db"
         ).lstrip("./")
@@ -92,6 +93,13 @@ class Settings:
         # --- Retrieval ---
         retrieval = cfg.get("retrieval", {})
         self.top_k: int = retrieval.get("top_k", 5)
+
+        # --- Agent ---
+        agent = cfg.get("agent", {})
+        self.prompt_version: str = agent.get("prompt_version", "v1")
+        self.prompts_dir: Path = Path(PROJECT_ROOT) / agent.get(
+            "prompts_dir", "./config/prompts"
+        ).lstrip("./")
 
     @staticmethod
     def _get_env(key: str) -> str:
