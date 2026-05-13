@@ -20,6 +20,7 @@ Maintenance        : delete_old_documents()
 """
 
 import logging
+import gc
 import shutil
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -256,7 +257,15 @@ class ChromaDBManager(VectorDBManager):
     def delete_db(self) -> None:
         """Delete the entire ChromaDB persist directory."""
         persist_dir: Path = settings.chroma_persist_dir
-        self._client = None
+        if self._client is not None:
+            # Stop the internal system to release the SQLite file lock
+            try:
+                self._client._system.stop()
+            except Exception:
+                pass
+            self._client = None
+            # Force GC to flush remaining SQLite handles (required on Windows)
+            gc.collect()
         if persist_dir.exists():
             shutil.rmtree(persist_dir)
             logger.warning("ChromaDB deleted: %s", persist_dir)
