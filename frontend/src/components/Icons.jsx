@@ -51,4 +51,6 @@ export const Icons = {
   LinkedIn:    (p) => <NxIcon {...p} d={["M3 3 H6 V13 H3 Z","M4.5 3 a1.5 1.5 0 1 0 0 -2 a1.5 1.5 0 0 0 0 2","M9 8 a2.5 2.5 0 0 1 5 0 V13 H11 V8","M9 6 V13"]} />,
   Twitter:     (p) => <NxIcon {...p} d={["M2 3 L14 13 M14 3 L2 13"]} />,
   Instagram:   (p) => <NxIcon {...p} d={["M3 3 H13 V13 H3 Z","M8 10.5 a2.5 2.5 0 1 0 0 -5 a2.5 2.5 0 0 0 0 5","M11 4.5 H11.1"]} />,
+  Trash:       (p) => <NxIcon {...p} d={["M3 4.5 H13","M5.5 4.5 V3 H10.5 V4.5","M5 4.5 L5.5 13 H10.5 L11 4.5","M7 7 V11 M9 7 V11"]} />,
+  Pencil:      (p) => <NxIcon {...p} d={["M10.5 2.5 L13.5 5.5 L6 13 L2.5 13.5 L3 10 Z","M9 4 L12 7"]} />,
 }

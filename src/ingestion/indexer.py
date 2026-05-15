@@ -39,18 +39,12 @@ def _get_embedder() -> OpenAIEmbeddings:
 
 
 def _resolve_collection_name(business_key: str) -> str:
-    """Map a short business key to its full collection name from config.
+    """Return the collection name for a business key.
 
-    Raises:
-        KeyError: If the business_key is not in the configured collections.
+    The key is used directly as the collection name. Collections are
+    created at app startup via ensure_collection.
     """
-    collections: dict[str, str] = settings.collections
-    if business_key not in collections:
-        valid = list(collections.keys())
-        raise KeyError(
-            f"Unknown business key '{business_key}'. Valid keys: {valid}"
-        )
-    return collections[business_key]
+    return business_key
 
 
 def _make_chunk_id(doc: Document, position: int) -> str:
@@ -147,6 +141,78 @@ def list_documents(business_key: str) -> list[dict]:
         name = source.split("/")[-1].split("\\")[-1]
         counts[name] = counts.get(name, 0) + 1
     return [{"name": k, "chunks": v} for k, v in sorted(counts.items())]
+
+
+def list_all_collections() -> list[str]:
+    """Return the names of all collections that exist in the vector DB."""
+    db: VectorDBManager = get_vector_db()
+    return sorted(col.name for col in db._db.list_collections())
+
+
+def drop_collection(business_key: str) -> None:
+    """Permanently delete an entire collection and all its documents.
+
+    Args:
+        business_key: Collection key to drop (must not be a configured key).
+    """
+    collection_name = _resolve_collection_name(business_key)
+    db: VectorDBManager = get_vector_db()
+    db.delete_collection(collection_name)
+    logger.info("Dropped collection '%s'.", collection_name)
+
+
+def rename_collection(old_key: str, new_key: str) -> None:
+    """Copy all vectors from old_key collection to new_key, then drop old.
+
+    ChromaDB does not support native rename, so we copy all embeddings,
+    documents and metadatas into a new collection then delete the old one.
+
+    Args:
+        old_key: Existing collection key.
+        new_key: Destination collection key (must not already exist).
+    """
+    old_name = _resolve_collection_name(old_key)
+    new_name = _resolve_collection_name(new_key)
+    db: VectorDBManager = get_vector_db()
+    old_col = db._get_collection(old_name)
+    data = old_col.get(include=["embeddings", "documents", "metadatas"])
+    db.ensure_collection(new_name)
+    if data.get("ids"):
+        db.upsert(
+            new_name,
+            data["ids"],
+            data["embeddings"],
+            data["documents"],
+            data["metadatas"],
+        )
+    db.delete_collection(old_name)
+    logger.info("Renamed collection '%s' → '%s'.", old_name, new_name)
+
+
+def delete_document(business_key: str, filename: str) -> int:
+    """Delete all chunks belonging to a specific document from the collection.
+
+    Args:
+        business_key: Short key from config (e.g. 'luster', 'solar_stay').
+        filename: The original filename (basename only) to remove.
+
+    Returns:
+        Number of chunks deleted.
+    """
+    collection_name = _resolve_collection_name(business_key)
+    db: VectorDBManager = get_vector_db()
+    db.ensure_collection(collection_name)
+    chroma_col = db._get_collection(collection_name)
+    result = chroma_col.get(include=["metadatas"])
+    ids_to_delete = []
+    for doc_id, meta in zip(result.get("ids") or [], result.get("metadatas") or []):
+        source = (meta or {}).get("source", "")
+        name = source.split("/")[-1].split("\\")[-1]
+        if name == filename:
+            ids_to_delete.append(doc_id)
+    if ids_to_delete:
+        chroma_col.delete(ids=ids_to_delete)
+    return len(ids_to_delete)
 
 
 def clear_collection(business_key: str) -> None:

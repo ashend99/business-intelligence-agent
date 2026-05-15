@@ -26,11 +26,12 @@ from dotenv import load_dotenv
 PROJECT_ROOT = os.getenv("PROJECT_DIR") or \
                                 Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = Path(PROJECT_ROOT) / "config" / "config.yaml"
+BUSINESS_CONFIG_FILE = Path(PROJECT_ROOT) / "config" / "business_config.yaml"
 ENV_FILE = Path(PROJECT_ROOT) / ".env"
 
 # Load .env — does nothing if file is missing (safe for production envs
 # where variables are injected directly)
-load_dotenv(ENV_FILE)
+load_dotenv(ENV_FILE, override=True)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -76,10 +77,6 @@ class Settings:
         self.chroma_persist_dir: Path = Path(PROJECT_ROOT) / vs.get(
             "persist_dir", "./vectorstore/chroma_db"
         ).lstrip("./")
-        self.collections: dict[str, str] = vs.get(
-            "collections",
-            {"cafe": "cafe_restaurant", "hotel": "airport_hotel", "gems": "gem_business"},
-        )
 
         # --- Ingestion ---
         ing = cfg.get("ingestion", {})

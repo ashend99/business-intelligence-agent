@@ -41,6 +41,9 @@ if [ -f ".env" ]; then
         # Split on first = only
         key="${line%%=*}"
         value="${line#*=}"
+        # Strip surrounding quotes from value
+        value="${value#\"}" ; value="${value%\"}"
+        value="${value#\'}" ; value="${value%\'}"
         # Skip if key is empty or contains spaces (malformed)
         [[ -z "$key" || "$key" == *" "* ]] && continue
         export "$key=$value"
