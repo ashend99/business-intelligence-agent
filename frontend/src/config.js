@@ -1,0 +1,43 @@
+// Business configuration — mirrors config/business_config.yaml
+// Update this file when changing business details.
+
+export const businessConfig = {
+  business: {
+    group: "SOLAR HUB",
+    businesses: [
+      {
+        name: "LUSTER Cafe & Restaurant",
+        key: "luster",
+        description: "A cozy cafe restaurant offering a variety of coffee, tea, and light meals. Located in the city center, it attracts both locals and tourists.",
+        industry: "Food & Beverage",
+        location: "Seeduwa",
+        contact_info: {
+          phone: "+1234567890",
+          email: "info@luster.cafe",
+        },
+      },
+      {
+        name: "SOLARSTAY Airport Hotel",
+        key: "solar_stay",
+        description: "A modern airport hotel offering comfortable accommodations and convenient access to the airport. Ideal for business travelers and tourists.",
+        industry: "Hospitality",
+        location: "Seeduwa",
+        contact_info: {
+          phone: "+0987654321",
+          email: "info@solarstay.hotel",
+        },
+      },
+      {
+        name: "SOLAR GEMS Jewelry Business",
+        key: "solar_gems",
+        description: "A jewelry business specializing in high-quality gemstones and custom jewelry design. Located in the city center, it caters to a discerning clientele.",
+        industry: "Retail",
+        location: "Seeduwa",
+        contact_info: {
+          phone: "+1122334455",
+          email: "info@solargems.jewelry",
+        },
+      },
+    ],
+  },
+}

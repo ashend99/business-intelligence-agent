@@ -20,7 +20,6 @@ Public API:
 """
 
 import logging
-from typing import Optional
 
 import chromadb
 from flashrank import Ranker, RerankRequest

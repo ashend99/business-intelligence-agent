@@ -1,7 +1,6 @@
 """Documents page — upload, index, and manage business documents."""
 
 import sys
-import tempfile
 from pathlib import Path
 
 import streamlit as st
@@ -9,9 +8,8 @@ import streamlit as st
 # Ensure src/ is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from ingestion.indexer import clear_collection, get_collection_count, index_documents  # noqa: E402
-from ingestion.loader import load_document  # noqa: E402
-from ingestion.splitter import split_documents  # noqa: E402
+from ingestion.indexer import clear_collection, get_collection_count  # noqa: E402
+from ingestion.upload_docs import DocumentUploadPipeline  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -70,50 +68,41 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     if st.button("⚡ Index uploaded files", type="primary"):
-        total_chunks = 0
-        errors = []
+        # Write uploads to temp files so the pipeline can read them by path
+        tmp_paths: list[tuple[Path, str]] = []
+        for uploaded_file in uploaded_files:
+            import tempfile
+            suffix = Path(uploaded_file.name).suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(uploaded_file.getbuffer())
+                tmp_paths.append((Path(tmp.name), uploaded_file.name))
+
+        file_paths = [p for p, _ in tmp_paths]
+        name_map = {p: name for p, name in tmp_paths}
 
         progress = st.progress(0, text="Starting…")
 
-        for i, uploaded_file in enumerate(uploaded_files):
-            progress.progress(
-                (i) / len(uploaded_files),
-                text=f"Processing {uploaded_file.name}…",
-            )
-            try:
-                # Write to a temp file so loader can read it by path
-                suffix = Path(uploaded_file.name).suffix
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=suffix
-                ) as tmp:
-                    tmp.write(uploaded_file.getbuffer())
-                    tmp_path = Path(tmp.name)
-
-                docs = load_document(tmp_path)
-                # Preserve original filename in metadata
-                for doc in docs:
-                    doc.metadata["source"] = uploaded_file.name
-
-                chunks = split_documents(docs)
-                indexed = index_documents(chunks, business_key)
-                total_chunks += indexed
-
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"{uploaded_file.name}: {exc}")
-            finally:
-                if tmp_path.exists():
-                    tmp_path.unlink()
+        pipeline = DocumentUploadPipeline(business_key)
+        result = pipeline.run(file_paths)
 
         progress.progress(1.0, text="Done.")
 
-        if errors:
-            st.warning(f"Indexed {total_chunks} chunks. Some files had errors:")
-            for err in errors:
-                st.error(err)
+        # Clean up temp files
+        for path in file_paths:
+            path.unlink(missing_ok=True)
+
+        if result.errors:
+            st.warning(
+                f"Indexed {result.chunks_indexed} chunks from "
+                f"{result.files_processed} file(s). "
+                f"{len(result.errors)} file(s) had errors:"
+            )
+            for err in result.errors:
+                st.error(f"{err['file']}: {err['error']}")
         else:
             st.success(
-                f"Successfully indexed {total_chunks} chunks from "
-                f"{len(uploaded_files)} file(s)."
+                f"Successfully indexed {result.chunks_indexed} chunks from "
+                f"{result.files_processed} file(s)."
             )
             st.rerun()
 

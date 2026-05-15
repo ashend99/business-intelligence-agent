@@ -5,7 +5,7 @@ Fixtures for config/settings.py tests.
 
 Strategy:
   - Write a minimal valid config.yaml to a temp directory
-  - Point AGENT_HOME to that temp directory so Settings resolves paths correctly
+  - Point PROJECT_DIR to that temp directory so Settings resolves paths correctly
   - Set OPENAI_API_KEY via monkeypatch so no real .env is needed
 """
 
@@ -64,8 +64,8 @@ def project_root(tmp_path: Path) -> Path:
 def settings_env(monkeypatch: pytest.MonkeyPatch, project_root: Path):
     """
     Patch environment so Settings() can be instantiated without a real .env.
-    Sets AGENT_HOME and OPENAI_API_KEY, then yields the project_root path.
+    Sets PROJECT_DIR and OPENAI_API_KEY, then yields the project_root path.
     """
-    monkeypatch.setenv("AGENT_HOME", str(project_root))
+    monkeypatch.setenv("PROJECT_DIR", str(project_root))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key-1234")
     yield project_root

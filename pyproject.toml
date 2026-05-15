@@ -14,16 +14,12 @@ dependencies = [
     "langchain-openai>=0.3",
     "langchain-community>=0.3",
     "langgraph>=0.3",
-
     # OpenAI
     "openai>=1.0",
-
     # Vector store
     "chromadb>=0.6",
-
     # UI
     "streamlit>=1.40",
-
     # Document loaders
     "pypdf>=5.0",
     "python-docx>=1.1",
@@ -33,13 +29,14 @@ dependencies = [
     "msoffcrypto-tool>=5.0",
     "pandas>=2.0",
     "unstructured>=0.16",
-
     # Reranking
     "flashrank>=0.2",
-
     # Config
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    "fastapi>=0.136.1",
+    "uvicorn>=0.46.0",
+    "python-multipart>=0.0.27",
 ]
 
 [project.optional-dependencies]

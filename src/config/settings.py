@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Resolve project root (two levels up from this file: src/config/settings.py)
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = os.getenv("AGENT_HOME") or \
+PROJECT_ROOT = os.getenv("PROJECT_DIR") or \
                                 Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = Path(PROJECT_ROOT) / "config" / "config.yaml"
 ENV_FILE = Path(PROJECT_ROOT) / ".env"

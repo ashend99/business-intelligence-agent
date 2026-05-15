@@ -1,4 +1,4 @@
-"""SOLAR BI Dashboard — Home page.
+"""Business Intelligence Admin Dashboard — Home page.
 
 Run with:
     streamlit run src/ui/app.py
@@ -9,8 +9,12 @@ from pathlib import Path
 
 import streamlit as st
 
+# Ensure src/ is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# ---------------------------------------------------------------------------
+# Page config — must be the first Streamlit call
+# ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="SOLAR Dashboard",
     page_icon="🏢",
@@ -19,42 +23,42 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Global CSS — Nexus design tokens + tile cards
+# Custom tile card CSS
 # ---------------------------------------------------------------------------
 st.markdown(
     """
     <style>
-    :root {
-        --indigo: #6C63FF;
-        --indigo-soft: rgba(108,99,255,0.12);
-        --teal: #00C9A7;
-        --amber: #F5A623;
-        --coral: #FF6B6B;
-        --border: #e5e5e5;
-        --panel: #ffffff;
-        --text: #111;
-        --text-2: #444;
-        --text-3: #888;
-    }
-
     a.tile-card {
         display: block;
         text-decoration: none;
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 2.25rem 1.75rem;
+        border: 1px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 2rem 1.5rem;
         text-align: center;
-        background: var(--panel);
+        background: #ffffff;
         transition: box-shadow 0.2s ease, transform 0.2s ease;
+        cursor: pointer;
     }
     a.tile-card:hover {
-        box-shadow: 0 8px 24px rgba(108,99,255,0.14);
-        transform: translateY(-4px);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+        transform: translateY(-3px);
         text-decoration: none;
     }
-    .tile-icon  { font-size: 2.8rem; line-height: 1; margin-bottom: 0.85rem; display: block; }
-    .tile-title { font-size: 1.15rem; font-weight: 700; color: var(--text); display: block; margin-bottom: 0.35rem; }
-    .tile-desc  { font-size: 0.88rem; color: var(--text-3); display: block; }
+    a.tile-card .tile-icon {
+        font-size: 3rem;
+        line-height: 1;
+        margin-bottom: 0.75rem;
+    }
+    a.tile-card .tile-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin-bottom: 0.4rem;
+        color: #111;
+    }
+    a.tile-card .tile-desc {
+        font-size: 0.9rem;
+        color: #555;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -63,12 +67,12 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-st.markdown("## 🏢 SOLAR Dashboard")
-st.markdown("<p style='color:#888;margin-top:-12px;'>Select a section to get started.</p>", unsafe_allow_html=True)
+st.title("🏢 SOLAR Dashboard")
+st.markdown("Select a section to get started.")
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Tile definitions
+# Tile definitions  (href matches Streamlit's auto-generated page URLs)
 # ---------------------------------------------------------------------------
 TILES = [
     {
@@ -85,15 +89,19 @@ TILES = [
     },
 ]
 
+# ---------------------------------------------------------------------------
+# Render tiles — the entire card is a native <a> link, no extra button
+# ---------------------------------------------------------------------------
 cols = st.columns(len(TILES), gap="large")
+
 for col, tile in zip(cols, TILES):
     with col:
         st.markdown(
             f"""
             <a class="tile-card" href="{tile['href']}" target="_self">
-                <span class="tile-icon">{tile['icon']}</span>
-                <span class="tile-title">{tile['title']}</span>
-                <span class="tile-desc">{tile['desc']}</span>
+                <div class="tile-icon">{tile['icon']}</div>
+                <div class="tile-title">{tile['title']}</div>
+                <div class="tile-desc">{tile['desc']}</div>
             </a>
             """,
             unsafe_allow_html=True,

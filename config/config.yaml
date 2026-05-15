@@ -14,9 +14,9 @@ vectorstore:
   provider: "chroma"
   persist_dir: "./vectorstore/chroma_db"
   collections:
-    cafe: "cafe_restaurant"
-    hotel: "airport_hotel"
-    gems: "gem_business"
+    luster: "luster_cafe_restaurant"
+    solar_stay: "solarstay_airport_hotel"
+    solar_gems: "solar_gems_jewelry"
 
 ingestion:
   docs_dir: "./docs"

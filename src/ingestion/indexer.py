@@ -130,6 +130,25 @@ def index_documents(docs: list[Document], business_key: str) -> int:
     return len(docs)
 
 
+def list_documents(business_key: str) -> list[dict]:
+    """Return per-source-file chunk counts for a business collection.
+
+    Returns:
+        List of {"name": str, "chunks": int} sorted by name.
+    """
+    collection_name = _resolve_collection_name(business_key)
+    db: VectorDBManager = get_vector_db()
+    db.ensure_collection(collection_name)
+    chroma_col = db._get_collection(collection_name)
+    result = chroma_col.get(include=["metadatas"])
+    counts: dict[str, int] = {}
+    for meta in result.get("metadatas") or []:
+        source = (meta or {}).get("source", "unknown")
+        name = source.split("/")[-1].split("\\")[-1]
+        counts[name] = counts.get(name, 0) + 1
+    return [{"name": k, "chunks": v} for k, v in sorted(counts.items())]
+
+
 def clear_collection(business_key: str) -> None:
     """Delete and recreate the collection for the given business key.
 
