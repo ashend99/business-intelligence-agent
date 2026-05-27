@@ -52,13 +52,8 @@ def _get_embedder() -> OpenAIEmbeddings:
 
 
 def _resolve_collection_name(business_key: str) -> str:
-    collections: dict[str, str] = settings.collections
-    if business_key not in collections:
-        raise KeyError(
-            f"Unknown business key '{business_key}'. "
-            f"Valid keys: {list(collections.keys())}"
-        )
-    return collections[business_key]
+    """Collection name equals the business key directly."""
+    return business_key
 
 
 def _rerank(
@@ -119,7 +114,9 @@ def _format_results(documents: list[str], metadatas: list[dict]) -> str:
     parts: list[str] = []
     for i, (text, meta) in enumerate(zip(documents, metadatas), start=1):
         source = meta.get("source", "unknown source")
-        parts.append(f"[{i}] Source: {source}\n{text.strip()}")
+        collection = meta.get("collection", "")
+        label = f"{collection}/{source}" if collection else source
+        parts.append(f"[{i}] Source: {label}\n{text.strip()}")
 
     return "\n\n---\n\n".join(parts)
 
@@ -128,79 +125,76 @@ def _format_results(documents: list[str], metadatas: list[dict]) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def build_rag_tool(business_key: str):
+def build_rag_tool():
     """
-    Build and return a LangChain tool bound to the given business collection.
-
-    The returned tool queries ChromaDB for the top-k most relevant chunks
-    matching the user's question and returns them as a formatted string.
-
-    Args:
-        business_key: One of 'cafe', 'hotel', 'gems'.
+    Build and return a LangChain tool that searches across ALL business
+    collections in ChromaDB, merges results, and reranks globally.
 
     Returns:
-        A LangChain BaseTool that the agent can call.
-
-    Raises:
-        KeyError: If business_key is not in the configured collections.
+        A LangChain BaseTool the agent can call.
     """
-    # Validate key eagerly so failures surface at agent init, not at query time.
-    collection_name = _resolve_collection_name(business_key)
     top_k: int = settings.top_k
 
     @tool
     def search_documents(query: str) -> str:
         """
-        Search the business document knowledge base for information relevant
-        to the query. Use this tool whenever the user asks a question about
-        the business — sales, revenue, operations, products, policies, etc.
+        Search the knowledge base across all business collections for information
+        relevant to the query. Use this tool whenever the user asks a question
+        about any business — sales, revenue, operations, products, policies, etc.
 
         Args:
             query: A natural language question or search phrase.
 
         Returns:
-            Relevant document excerpts with source citations.
+            Relevant document excerpts with source and collection citations.
         """
-        logger.info(
-            "RAG query for collection '%s': %s", collection_name, query
-        )
-
-        try:
-            client = _get_chroma_client()
-            collection = client.get_collection(name=collection_name)
-        except Exception as exc:
-            # Collection may not exist if no documents have been indexed yet.
-            logger.warning("Collection '%s' not found: %s", collection_name, exc)
-            return (
-                f"No documents have been indexed for this business yet. "
-                f"Please upload and ingest documents first."
-            )
-
+        client = _get_chroma_client()
         embedder = _get_embedder()
         query_vector = embedder.embed_query(query)
 
-        # Stage 1: over-fetch from ChromaDB (wide recall)
-        fetch_k = min(top_k * RERANK_FETCH_MULTIPLIER, collection.count())
-        results = collection.query(
-            query_embeddings=[query_vector],
-            n_results=fetch_k,
-            include=["documents", "metadatas", "distances"],
-        )
+        # Collect existing collections
+        try:
+            collection_names = [c.name for c in client.list_collections()]
+        except Exception as exc:
+            logger.warning("Could not list collections: %s", exc)
+            return "No documents have been indexed yet."
 
-        documents: list[str] = results["documents"][0]
-        metadatas: list[dict] = results["metadatas"][0]
-        distances: list[float] = results["distances"][0]
+        if not collection_names:
+            return "No documents have been indexed yet. Please upload documents first."
 
-        logger.info(
-            "Vector search retrieved %d candidates (distances: %s)",
-            len(documents),
-            [round(d, 4) for d in distances],
-        )
+        all_documents: list[str] = []
+        all_metadatas: list[dict] = []
 
-        # Stage 2: rerank to top_k (high precision)
-        if len(documents) > top_k:
-            documents, metadatas = _rerank(query, documents, metadatas, top_k)
+        for col_name in collection_names:
+            try:
+                collection = client.get_collection(name=col_name)
+                count = collection.count()
+                if count == 0:
+                    continue
+                fetch_k = min(top_k * RERANK_FETCH_MULTIPLIER, count)
+                results = collection.query(
+                    query_embeddings=[query_vector],
+                    n_results=fetch_k,
+                    include=["documents", "metadatas", "distances"],
+                )
+                docs = results["documents"][0]
+                metas = results["metadatas"][0]
+                # Tag each chunk with its collection
+                for meta in metas:
+                    meta["collection"] = col_name
+                all_documents.extend(docs)
+                all_metadatas.extend(metas)
+                logger.info("Fetched %d candidates from '%s'", len(docs), col_name)
+            except Exception as exc:
+                logger.warning("Skipping collection '%s': %s", col_name, exc)
 
-        return _format_results(documents, metadatas)
+        if not all_documents:
+            return "No relevant documents found across any collection."
+
+        # Global rerank across all collections
+        if len(all_documents) > top_k:
+            all_documents, all_metadatas = _rerank(query, all_documents, all_metadatas, top_k)
+
+        return _format_results(all_documents, all_metadatas)
 
     return search_documents

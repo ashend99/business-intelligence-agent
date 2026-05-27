@@ -49,3 +49,5 @@ htmlcov/
 node_modules/
 
 nexus/
+
+api_tokens.txt

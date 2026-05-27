@@ -7,6 +7,7 @@ const NAV = [
   { id: 'home',      label: 'Home',      icon: 'Home'    },
   { id: 'chat',      label: 'Chatbot',   icon: 'Chatbot' },
   { id: 'documents', label: 'Documents', icon: 'Doc'     },
+  { id: 'social',    label: 'Social',    icon: 'Social'  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -29,7 +30,7 @@ function Sidebar({ active, onSelect, collapsed, onToggle, businessGroup }) {
   return (
     <div style={{ width: W, flex: `0 0 ${W}px`, background: 'var(--bg-2)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', transition: 'width 200ms ease', overflow: 'hidden' }}>
       {/* Logo + workspace */}
-      <div style={{ height: 48, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)' }}>
+      <div style={{ position: 'relative', height: 48, padding: collapsed ? '0 8px 0 12px' : '0 12px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)' }}>
         <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--indigo)', color: 'white', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 24px' }}>
           <Icons.Nexus size={14} />
         </div>
@@ -39,11 +40,22 @@ function Sidebar({ active, onSelect, collapsed, onToggle, businessGroup }) {
             <div style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Business Intelligent Platform</div>
           </div>
         )}
-        {!collapsed && (
-          <button className="btn ghost icon" onClick={onToggle} title="Collapse">
-            <Icons.PinLeft size={14} />
-          </button>
-        )}
+        <button
+          className="btn ghost icon"
+          onClick={onToggle}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{
+            marginLeft: 'auto',
+            position: collapsed ? 'absolute' : 'static',
+            right: collapsed ? 6 : 'auto',
+            top: collapsed ? '50%' : 'auto',
+            transform: collapsed ? 'translateY(-50%)' : 'none',
+            zIndex: 1,
+          }}
+        >
+          {collapsed ? <Icons.ChevronLeft size={14} style={{ transform: 'rotate(180deg)' }} /> : <Icons.PinLeft size={14} />}
+        </button>
       </div>
 
       {/* Workspace switcher */}
@@ -149,6 +161,10 @@ function ContextPanel({ open, onClose, page }) {
       { tool: 'list_reports', args: 'status=ready', ms: 88, ok: true },
       { tool: 'draft_report', args: 'type=weekly', ms: 4210, ok: true },
     ],
+    social: [
+      { tool: 'get_social_overview', args: 'platform=selected', ms: 180, ok: true },
+      { tool: 'get_top_posts', args: 'platform=selected', ms: 260, ok: true },
+    ],
   }[page] || []
 
   return (
@@ -209,6 +225,7 @@ function CommandPalette({ open, onClose, onNavigate }) {
     { kind: 'nav',    id: 'home',      label: 'Go to Home',      icon: 'Home'    },
     { kind: 'nav',    id: 'chat',      label: 'Go to Chatbot',   icon: 'Chatbot' },
     { kind: 'nav',    id: 'documents', label: 'Go to Documents',  icon: 'Doc'     },
+    { kind: 'nav',    id: 'social',    label: 'Go to Social', icon: 'Social' },
     { kind: 'action', label: 'Generate weekly report',    icon: 'Doc'  },
     { kind: 'action', label: 'Draft reply to top mention', icon: 'Send' },
     { kind: 'action', label: 'Show urgent tickets',        icon: 'Bell' },
@@ -252,6 +269,7 @@ export function Shell({ page, onNavigate, children, businessGroup }) {
     home:      { title: 'Home',      breadcrumb: 'Overview' },
     chat:      { title: 'Chatbot',   breadcrumb: 'AI Assistant' },
     documents: { title: 'Documents', breadcrumb: 'Knowledge base' },
+    social:    { title: 'Social',    breadcrumb: 'Platform Analytics' },
   }
   const P = PAGES[page] || PAGES.home
 

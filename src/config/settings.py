@@ -55,6 +55,8 @@ class Settings:
 
         # --- Secrets (from environment) ---
         self.openai_api_key: str = self._get_env("OPENAI_API_KEY")
+        # Optional — social features are disabled gracefully when not set
+        self.facebook_access_token: str | None = os.getenv("FACEBOOK_ACCESS_TOKEN") or None
 
         # --- App ---
         app = cfg.get("app", {})
