@@ -3,7 +3,7 @@ import { Shell } from './components/Shell'
 import { Home } from './pages/Home'
 import { Chat } from './pages/Chat'
 import { Documents } from './pages/Documents'
-import { FacebookAnalytics } from './pages/FacebookAnalytics'
+import { Social } from './pages/Social'
 import { businessConfig } from './config'
 
 const APP_PAGE_STORAGE_KEY = 'bi.app.activePage'
@@ -12,7 +12,7 @@ const PAGES = {
   home: Home,
   chat: Chat,
   documents: Documents,
-  social: FacebookAnalytics,
+  social: Social,
 }
 
 export default function App() {

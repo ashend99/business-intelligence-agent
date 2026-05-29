@@ -10,10 +10,10 @@ from typing import Any
 
 import yaml
 
-from mcp.instagram.client import get_client
+from mcp_server.instagram.client import get_client
 
 PROJECT_DIR = os.getenv("PROJECT_DIR") or Path(__file__).resolve().parents[3]
-INSTAGRAM_CONFIG_PATH = Path(PROJECT_DIR) / "src" / "mcp" / "instagram" / "config.yaml"
+INSTAGRAM_CONFIG_PATH = Path(PROJECT_DIR) / "src" / "mcp_server" / "instagram" / "config.yaml"
 logger = logging.getLogger(__name__)
 
 
@@ -254,6 +254,24 @@ def _media_type_label(media_type: str | None) -> str:
     return mapping.get((media_type or "").upper(), "Post")
 
 
+def _select_media_preview_url(
+    media_type: str | None,
+    media_url: str | None,
+    thumbnail_url: str | None,
+) -> str:
+    """Select best preview URL for a media item.
+
+    IG video/reel often provides thumbnail_url; image posts rely on media_url.
+    """
+    media_type_upper = (media_type or "").upper()
+    media_url_value = (media_url or "").strip()
+    thumbnail_url_value = (thumbnail_url or "").strip()
+
+    if media_type_upper in {"VIDEO", "REEL"}:
+        return thumbnail_url_value or media_url_value
+    return media_url_value or thumbnail_url_value
+
+
 def _post_title(caption: str | None, fallback: str) -> str:
     first_line = (caption or "").strip().splitlines()[0] if caption else ""
     if not first_line:
@@ -281,7 +299,7 @@ async def _get_insights_by_metric_names(
     window_days = int(metric_cfg.get("window_days", 28))
 
     if not route_template:
-        raise ValueError("Missing routing.insights_path in src/mcp/instagram/config.yaml")
+        raise ValueError("Missing routing.insights_path in src/mcp_server/instagram/config.yaml")
     if window_days < 1:
         raise ValueError("metrics.reach.window_days must be at least 1")
 
@@ -329,7 +347,7 @@ async def get_accounts(limit: int = 25) -> list[InstagramAccount]:
     )
 
     if not route_template:
-        raise ValueError("Missing routing.accounts_path in src/mcp/instagram/config.yaml")
+        raise ValueError("Missing routing.accounts_path in src/mcp_server/instagram/config.yaml")
 
     client = get_client()
     accounts: list[InstagramAccount] = []
@@ -431,7 +449,7 @@ async def get_reach_timeseries_by_account_id(
     window_days = int(reach_cfg.get("window_days", 28))
 
     if not chart_route_template:
-        raise ValueError("Missing routing.chart_insights_path in src/mcp/instagram/config.yaml")
+        raise ValueError("Missing routing.chart_insights_path in src/mcp_server/instagram/config.yaml")
     if window_days < 1:
         raise ValueError("metrics.reach.window_days must be at least 1")
 
@@ -594,7 +612,7 @@ async def get_top_posts_by_account_id(
     posts_cfg = config.get("posts", {})
     media_fields = posts_cfg.get(
         "media_fields",
-        "id,caption,media_type,timestamp,media_url,permalink,insights.metric(reach,total_interactions)",
+        "id,caption,media_type,timestamp,thumbnail_url,media_url,permalink,insights.metric(reach,total_interactions)",
     )
     configured_limit = int(posts_cfg.get("default_limit", 10))
     effective_limit = max(int(limit or configured_limit), 1)
@@ -618,6 +636,11 @@ async def get_top_posts_by_account_id(
         engagement_rate = round((engagement_total / reach_total) * 100, 2) if reach_total > 0 else None
 
         fallback_title = f"Instagram post · {created_at.date().isoformat()}"
+        preview_url = _select_media_preview_url(
+            item.get("media_type"),
+            item.get("media_url"),
+            item.get("thumbnail_url"),
+        )
         ranked_posts.append(
             {
                 "id": media_id,
@@ -627,7 +650,8 @@ async def get_top_posts_by_account_id(
                 "reach": reach_total,
                 "engagement_total": engagement_total,
                 "engagement_rate": engagement_rate,
-                "thumbnail_url": item.get("thumbnail_url") or item.get("media_url") or "",
+                "thumbnail_url": preview_url,
+                "media_url": (item.get("media_url") or "").strip(),
                 "permalink_url": item.get("permalink") or "",
                 "reach_label": _format_compact(reach_total),
                 "engagement_label": _format_compact(engagement_total),
@@ -688,6 +712,11 @@ async def get_all_posts_by_account_id(account_id: str) -> list[dict[str, Any]]:
             engagement_rate = round((engagement_total / reach_total) * 100, 2) if reach_total > 0 else None
 
             fallback_title = f"Instagram post · {created_at.date().isoformat()}"
+            preview_url = _select_media_preview_url(
+                item.get("media_type"),
+                item.get("media_url"),
+                item.get("thumbnail_url"),
+            )
             all_posts.append(
                 {
                     "id": media_id,
@@ -697,7 +726,8 @@ async def get_all_posts_by_account_id(account_id: str) -> list[dict[str, Any]]:
                     "reach": reach_total,
                     "engagement_total": engagement_total,
                     "engagement_rate": engagement_rate,
-                    "thumbnail_url": item.get("thumbnail_url") or item.get("media_url") or "",
+                    "thumbnail_url": preview_url,
+                    "media_url": (item.get("media_url") or "").strip(),
                     "permalink_url": item.get("permalink") or "",
                     "reach_label": _format_compact(reach_total),
                     "engagement_label": _format_compact(engagement_total),
@@ -722,7 +752,7 @@ async def get_posts_metrics_by_account_id(account_id: str) -> list[dict[str, Any
     """Return lifetime Instagram post metrics using media-level count fields.
 
     Graph API shape:
-    /{ig_user_id}/media?fields=id,caption,media_product_type,total_views_count,total_like_count,comments_count,shares_count,reposts_count,saved_count,thumbnail_url
+    /{ig_user_id}/media?fields=id,caption,media_type,media_product_type,total_views_count,total_like_count,comments_count,shares_count,reposts_count,saved_count,thumbnail_url,media_url
     """
     config = _load_config()
     account = await get_account_by_id(account_id)
@@ -732,8 +762,8 @@ async def get_posts_metrics_by_account_id(account_id: str) -> list[dict[str, Any
     media_route_template = config.get("routing", {}).get("media_path", "/{ig_user_id}/media")
     media_path = media_route_template.format(ig_user_id=account.id)
     requested_fields = (
-        "id,caption,media_product_type,total_views_count,total_like_count,comments_count,"
-        "shares_count,reposts_count,saved_count,thumbnail_url,timestamp"
+        "id,caption,media_type,media_product_type,total_views_count,total_like_count,comments_count,"
+        "shares_count,reposts_count,saved_count,thumbnail_url,media_url,timestamp"
     )
 
     client = get_client()
@@ -769,17 +799,24 @@ async def get_posts_metrics_by_account_id(account_id: str) -> list[dict[str, Any
                 if created_at is not None
                 else "Instagram post"
             )
+            media_type_value = item.get("media_type") or item.get("media_product_type")
+            preview_url = _select_media_preview_url(
+                media_type_value,
+                item.get("media_url"),
+                item.get("thumbnail_url"),
+            )
 
             all_posts.append(
                 {
                     "id": item.get("id"),
                     "title": _post_title(item.get("caption"), fallback_title),
                     "created_at": created_at.isoformat() if created_at else None,
-                    "type": (item.get("media_product_type") or "Post").title(),
+                    "type": _media_type_label(media_type_value),
                     "reach": views,
                     "engagement_total": engagement_total,
                     "engagement_rate": engagement_rate,
-                    "thumbnail_url": item.get("thumbnail_url") or "",
+                    "thumbnail_url": preview_url,
+                    "media_url": (item.get("media_url") or "").strip(),
                     "reach_label": _format_compact(views),
                     "engagement_label": _format_compact(engagement_total),
                     "view_count": views,
@@ -855,7 +892,7 @@ async def get_audience_demographics_by_account_id(account_id: str) -> dict[str, 
     config = _load_config()
     route_template = config.get("routing", {}).get("insights_path")
     if not route_template:
-        raise ValueError("Missing routing.insights_path in src/mcp/instagram/config.yaml")
+        raise ValueError("Missing routing.insights_path in src/mcp_server/instagram/config.yaml")
 
     account = await get_account_by_id(account_id)
     if account is None:

@@ -63,8 +63,8 @@ Keep all route templates and metric names in platform config files to avoid hard
 
 Current config files:
 
-- `src/mcp/facebook/config.yaml`
-- `src/mcp/instagram/config.yaml`
+- `src/mcp_server/facebook/config.yaml`
+- `src/mcp_server/instagram/config.yaml`
 
 Recommended structure style:
 

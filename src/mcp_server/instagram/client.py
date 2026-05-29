@@ -7,7 +7,7 @@ For Instagram Basic Display API, use ``InstagramBasicDisplayClient`` which
 targets ``graph.instagram.com``.
 """
 
-from mcp.common.client import (
+from mcp_server.common.client import (
     GraphAPIError,
     GraphClient,
     close_singleton_client,

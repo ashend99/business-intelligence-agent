@@ -1,11 +1,11 @@
 import asyncio
-from mcp.facebook.analytics import get_pages_field
-from mcp.facebook.client import init_client, close_client, GraphAPIError
+from mcp_server.facebook.analytics import get_pages_field
+from mcp_server.facebook.client import init_client, close_client, GraphAPIError
 
 ACCESS_TOKEN = "EAARSt8dYWZCYBRYkZAZArgZC8jZCkZCaUqaYjiq9qE5F8N6DPwAdoZCXZBMAc2Oa5UJZAEe3Cgo1xNRJuP6ZBOigUGuh1VN62QPdY3gTgFJIssZCLjY8gVwaCsrxToR4tWqZBZBmQe4pZAInK2rzmHfTP5nE9aY6xGp7Y2kLuLSh8ZAIo2m6EEaZC0HHyvRSsolVyZAm9KvDqXKicxra1HlVmf9v0KmyIKMx17OqQKpXo"
 
 async def main():
-    # Initialize once — simulates MCP server startup
+    # Initialize once — simulates mcp_server server startup
     init_client(ACCESS_TOKEN)
     try:
         fb_pages = await get_pages_field("name")

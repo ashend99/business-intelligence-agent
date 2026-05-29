@@ -9,10 +9,10 @@ from typing import Any
 
 import yaml
 
-from mcp.facebook.client import FacebookGraphClient, get_client
+from mcp_server.facebook.client import FacebookGraphClient, get_client
 
 PROJECT_DIR = os.getenv("PROJECT_DIR") or Path(__file__).resolve().parents[3]
-FACEBOOK_CONFIG_PATH = Path(PROJECT_DIR) / "src" / "mcp" / "facebook" / "config.yaml"
+FACEBOOK_CONFIG_PATH = Path(PROJECT_DIR) / "src" / "mcp_server" / "facebook" / "config.yaml"
 _PAGE_FIELDS = (
     "id,name,username,category,fan_count,followers_count,"
     "picture,cover,link,about,website,verification_status,"
@@ -268,6 +268,39 @@ async def get_reach_by_page_id(
     if page is None:
         raise ValueError(f"Facebook page not found: {page_id}")
     return await get_reach_for_page(page, since=since, until=until, period=period)
+
+
+async def get_posts_count_for_page(page: FacebookPage) -> dict[str, Any]:
+    """Return published post count for a Facebook page."""
+    if not page.access_token:
+        raise ValueError(f"No page access token available for page: {page.name}")
+
+    async with FacebookGraphClient(page.access_token) as client:
+        payload = await client.get(
+            f"/{page.id}/published_posts",
+            fields="id",
+            limit=1,
+            summary="true",
+        )
+
+    total_count = int(((payload.get("summary") or {}).get("total_count")) or 0)
+    return {
+        "label": "Posts",
+        "metric": "posts_count",
+        "value": _format_compact(total_count),
+        "total_count": total_count,
+        "current_total": total_count,
+        "previous_total": 0,
+        "delta": "0.0%",
+        "spark": [],
+    }
+
+
+async def get_posts_count_by_page_id(page_id: str) -> dict[str, Any]:
+    page = await get_page_by_id(page_id)
+    if page is None:
+        raise ValueError(f"Facebook page not found: {page_id}")
+    return await get_posts_count_for_page(page)
 
 async def get_reach(page_name: str) -> dict:
     """Return summarized reach analytics for a managed Facebook page."""

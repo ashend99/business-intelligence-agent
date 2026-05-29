@@ -1,0 +1,152 @@
+routing:
+  accounts_path: "/me/accounts"
+  insights_path: "/{ig_user_id}/insights"
+  chart_insights_path: "/{ig_user_id}/insights"
+  media_path: "/{ig_user_id}/media"
+
+accounts:
+  fields: "id,name,instagram_business_account{id,username,profile_picture_url,followers_count,follows_count,media_count}"
+
+metrics:
+  reach:
+    name: "reach"
+    period: "day"
+    window_days: 28
+  views:
+    name: "views"
+    period: "day"
+    window_days: 28
+  total_interactions:
+    name: "total_interactions"
+    period: "day"
+    window_days: 28
+  accounts_engaged:
+    name: "accounts_engaged"
+    period: "day"
+    window_days: 28
+  follows_and_unfollows:
+    name: "follows_and_unfollows"
+    period: "day"
+    window_days: 28
+  profile_links_taps:
+    name: "profile_links_taps"
+    period: "day"
+    window_days: 28
+
+posts:
+  media_fields: "id,caption,media_type,timestamp,thumbnail_url,media_url,permalink,insights.metric(reach,total_interactions)"
+  default_limit: 10
+
+social_overview:
+  supported_periods:
+    - "day"
+    - "week"
+    - "days_28"
+    - "month"
+    - "lifetime"
+    - "total_over_range"
+  route: "/api/social/overview"
+  defaults:
+    period: "day"
+    timezone: "UTC"
+    chart_days: 30
+    top_posts_limit: 10
+  behavior:
+    enable_cache: false
+    cache_ttl_seconds: 120
+    partial_success: true
+    comparison_window: true
+  include_sections:
+    - "summary"
+    - "kpis"
+    - "charts"
+    - "audience"
+    - "posts"
+  include_kpis:
+    - "reach"
+    - "views"
+    - "engagement"
+    - "engagement_rate"
+    - "followers"
+    - "engaged_accounts"
+    - "account_profile"
+  metrics:
+    insights:
+      - "reach"
+      - "views"
+      - "engagement"
+      - "engagement_rate"
+    snapshot_profile:
+      - "followers"
+      - "following"
+      - "posts"
+    breakdowns:
+      - "posts_breakdown"
+      - "engagement_breakdown"
+      - "audience_demographics"
+
+social_analytics:
+  supported_periods:
+    - "day"
+    - "week"
+    - "days_28"
+    - "month"
+    - "lifetime"
+    - "total_over_range"
+  route: "/api/social/analytics"
+  defaults:
+    period: "day"
+    timezone: "UTC"
+    top_posts_limit: 10
+  behavior:
+    partial_success: true
+    comparison_window: true
+  include_sections:
+    - "kpis_window"
+    - "engagement_breakdown_window"
+    - "top_performance_posts_window"
+    - "engagement_metric_details"
+    - "key_insights"
+  include_kpis:
+    - "reach"
+    - "views"
+    - "engagement"
+    - "engagement_rate"
+    - "engaged_accounts"
+    - "follows_and_unfollows"
+    - "profile_links_taps"
+  metrics:
+    insights:
+      - "reach"
+      - "views"
+      - "engagement"
+      - "engagement_rate"
+      - "engaged_accounts"
+      - "follows_and_unfollows"
+      - "profile_links_taps"
+
+social_posts:
+  supported_periods:
+    - "day"
+    - "week"
+    - "days_28"
+    - "month"
+    - "lifetime"
+    - "total_over_range"
+  route: "/api/social/posts"
+  defaults:
+    period: "day"
+    timezone: "UTC"
+    scope: "lifetime"
+    sort_by: "engagement_total"
+    limit: 50
+  behavior:
+    partial_success: true
+  include_sections:
+    - "all_posts_table"
+    - "posts_type_breakdown"
+    - "pagination"
+  include_cards:
+    - "total_posts"
+    - "total_engagement"
+    - "avg_engagement_rate"

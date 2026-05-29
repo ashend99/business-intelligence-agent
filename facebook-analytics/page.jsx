@@ -164,7 +164,7 @@ function GranularitySelect({ value }) {
   );
 }
 
-function FacebookAnalyticsPage() {
+function SocialPage() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
       <Sidebar />
@@ -424,4 +424,4 @@ function AgeGenderBars() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<FacebookAnalyticsPage />);
+ReactDOM.createRoot(document.getElementById('root')).render(<SocialPage />);

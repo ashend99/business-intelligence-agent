@@ -1,9 +1,9 @@
 """Low-level Facebook client backed by shared Graph API primitives.
 
 Usage (singleton — recommended):
-    from src.mcp.facebook.client import init_client, get_client
+    from src.mcp_server.facebook.client import init_client, get_client
 
-    # Once at startup (e.g. FastAPI lifespan / MCP server init):
+    # Once at startup (e.g. FastAPI lifespan / mcp_server server init):
     init_client("EAAxxxx...")
 
     # Everywhere else:
@@ -15,7 +15,7 @@ Usage (one-off / testing):
         data = await client.get("/me/accounts")
 """
 
-from mcp.common.client import (
+from mcp_server.common.client import (
     GraphAPIError,
     GraphClient,
     close_singleton_client,
@@ -45,7 +45,7 @@ class FacebookGraphClient(GraphClient):
 def init_client(access_token: str | None = None) -> FacebookGraphClient:
     """Create (or replace) the module-level singleton client.
 
-    Call this once at application startup — FastAPI lifespan, MCP server
+    Call this once at application startup — FastAPI lifespan, mcp_server server
     ``__main__``, or test fixtures.  All subsequent calls to ``get_client()``
     return the same instance, reusing its HTTP connection pool.
 
@@ -77,7 +77,7 @@ async def close_client() -> None:
     """Close the singleton client and release its connection pool.
 
     Call this during application shutdown (FastAPI lifespan teardown /
-    MCP server cleanup).
+    mcp_server server cleanup).
     """
     await close_singleton_client(_singleton)
 

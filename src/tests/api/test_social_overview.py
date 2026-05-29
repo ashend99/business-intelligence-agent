@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from api.social_overview import _compute_previous_window_bounds, build_social_overview
-from mcp.instagram.analytics import get_overview_metrics_by_account_id
+from mcp_server.instagram.analytics import get_overview_metrics_by_account_id
 
 
 class TestSocialOverview:
@@ -358,8 +358,8 @@ async def test_get_overview_metrics_uses_single_graph_call():
     client = AsyncMock()
     client.get = AsyncMock(return_value=payload)
 
-    with patch("mcp.instagram.analytics.get_account_by_id", new=AsyncMock(return_value=account)), patch(
-        "mcp.instagram.analytics.get_client",
+    with patch("mcp_server.instagram.analytics.get_account_by_id", new=AsyncMock(return_value=account)), patch(
+        "mcp_server.instagram.analytics.get_client",
         return_value=client,
     ):
         result = await get_overview_metrics_by_account_id(

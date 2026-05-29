@@ -1,4 +1,4 @@
-"""Shared MCP utilities and base clients."""
+"""Shared mcp_server utilities and base clients."""
 
 from .client import (
     GraphAPIError,

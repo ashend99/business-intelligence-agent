@@ -1,8 +1,0 @@
-routing:
-  insights_path: "/{page_id}/insights"
-
-metrics:
-  reach:
-    name: "page_impressions_unique"
-    period: "day"
-    window_days: 28

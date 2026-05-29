@@ -1,0 +1,109 @@
+routing:
+  insights_path: "/{page_id}/insights"
+
+metrics:
+  reach:
+    name: "page_impressions_unique"
+    period: "day"
+    window_days: 28
+
+social_overview:
+  supported_periods:
+    - "day"
+    - "week"
+    - "days_28"
+    - "month"
+    - "lifetime"
+    - "total_over_range"
+  route: "/api/social/overview"
+  defaults:
+    period: "day"
+    timezone: "UTC"
+    chart_days: 30
+    top_posts_limit: 10
+  behavior:
+    enable_cache: false
+    cache_ttl_seconds: 120
+    partial_success: true
+    comparison_window: true
+  include_sections:
+    - "summary"
+    - "kpis"
+    - "charts"
+    - "audience"
+    - "posts"
+  include_kpis:
+    - "reach"
+    - "engagement"
+    - "engagement_rate"
+    - "followers"
+    - "video_views"
+    - "views"
+    - "posts_count"
+  metrics:
+    insights:
+      - "reach"
+      - "views"
+      - "engagement"
+      - "engagement_rate"
+    snapshot_profile:
+      - "followers"
+      - "page_likes"
+      - "posts"
+    breakdowns: []
+
+social_analytics:
+  supported_periods:
+    - "day"
+    - "week"
+    - "days_28"
+    - "month"
+    - "lifetime"
+    - "total_over_range"
+  route: "/api/social/analytics"
+  defaults:
+    period: "day"
+    timezone: "UTC"
+    top_posts_limit: 10
+  behavior:
+    partial_success: true
+    comparison_window: true
+  include_sections:
+    - "kpis_window"
+    - "engagement_breakdown_window"
+    - "top_performance_posts_window"
+    - "engagement_metric_details"
+  include_kpis:
+    - "reach"
+    - "engagement"
+    - "engagement_rate"
+  metrics:
+    insights:
+      - "reach"
+      - "engagement"
+      - "engagement_rate"
+
+social_posts:
+  supported_periods:
+    - "day"
+    - "week"
+    - "days_28"
+    - "month"
+    - "lifetime"
+    - "total_over_range"
+  route: "/api/social/posts"
+  defaults:
+    period: "day"
+    timezone: "UTC"
+    scope: "lifetime"
+    sort_by: "engagement_total"
+    limit: 50
+  behavior:
+    partial_success: true
+  include_sections:
+    - "all_posts_table"
+    - "posts_type_breakdown"
+  include_cards:
+    - "total_posts"
+    - "total_engagement"
+    - "avg_engagement_rate"

@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcp.instagram.analytics import _normalize_value, get_engagement_breakdown_by_account_id
+from mcp_server.instagram.analytics import _normalize_value, get_engagement_breakdown_by_account_id
 
 
 def test_normalize_value_handles_nested_graph_payload():
@@ -46,7 +46,7 @@ async def test_engagement_breakdown_clamps_negative_component_values(monkeypatch
     async def _fake_get_insights(*args, **kwargs):
         return mocked
 
-    monkeypatch.setattr("mcp.instagram.analytics._get_insights_by_metric_names", _fake_get_insights)
+    monkeypatch.setattr("mcp_server.instagram.analytics._get_insights_by_metric_names", _fake_get_insights)
 
     result = await get_engagement_breakdown_by_account_id("1784")
 

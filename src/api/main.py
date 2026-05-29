@@ -35,10 +35,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from ingestion.indexer import clear_collection, delete_document, drop_collection, get_collection_count, list_all_collections, list_documents, rename_collection  # noqa: E402
 from ingestion.upload_docs import DocumentUploadPipeline  # noqa: E402
 from ingestion.vectordb import get_vector_db  # noqa: E402
-from mcp.facebook.client import init_client as init_facebook_client, close_client as close_facebook_client  # noqa: E402
-from mcp.facebook.analytics import get_pages, get_pages_field, get_reach  # noqa: E402
-from mcp.instagram.client import init_client as init_instagram_client, close_client as close_instagram_client  # noqa: E402
-from mcp.instagram.analytics import get_accounts, get_top_posts_by_account_id, get_all_posts_by_account_id, get_posts_metrics_by_account_id, get_engagement_breakdown_by_account_id, get_overview_metrics_by_account_id, get_audience_demographics_by_account_id  # noqa: E402
+from mcp_server.facebook.client import init_client as init_facebook_client, close_client as close_facebook_client  # noqa: E402
+from mcp_server.facebook.analytics import get_pages, get_pages_field, get_reach  # noqa: E402
+from mcp_server.instagram.client import init_client as init_instagram_client, close_client as close_instagram_client  # noqa: E402
+from mcp_server.instagram.analytics import get_accounts, get_top_posts_by_account_id, get_all_posts_by_account_id, get_posts_metrics_by_account_id, get_engagement_breakdown_by_account_id, get_overview_metrics_by_account_id, get_audience_demographics_by_account_id  # noqa: E402
 from api.social_overview import build_social_overview  # noqa: E402
 from config.settings import settings  # noqa: E402
 
@@ -83,10 +83,10 @@ app = FastAPI(title="SOLAR BI API", version="1.0.0", redirect_slashes=True, life
 
 
 @app.middleware("http")
-async def disable_social_http_cache(request: Request, call_next):
-    """Disable HTTP caching for social endpoints during validation."""
+async def disable_api_http_cache(request: Request, call_next):
+    """Disable HTTP caching for API responses during validation."""
     response = await call_next(request)
-    if request.url.path.startswith("/api/social/"):
+    if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -116,16 +116,46 @@ VALID_KEYS = _load_valid_keys()
 
 
 _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
-_SUPPORTED_SOCIAL_PERIODS = {
+_OVERVIEW_CFG = settings.social_overview if isinstance(settings.social_overview, dict) else {}
+_OVERVIEW_DEFAULTS = _OVERVIEW_CFG.get("defaults", {}) if isinstance(_OVERVIEW_CFG.get("defaults", {}), dict) else {}
+_SOCIAL_OVERVIEW_ROUTE = str(_OVERVIEW_CFG.get("route", "/api/social/overview"))
+_DEFAULT_SOCIAL_PERIOD = str(_OVERVIEW_DEFAULTS.get("period", "day"))
+_DEFAULT_SOCIAL_TIMEZONE = str(_OVERVIEW_DEFAULTS.get("timezone", "UTC"))
+_SUPPORTED_SOCIAL_PERIODS = set(settings.social_supported_periods or [
     "day",
     "week",
     "days_28",
     "month",
     "lifetime",
     "total_over_range",
-}
+])
 
 _INSTAGRAM_MAX_LOOKBACK_DAYS = 90
+
+_ANALYTICS_CFG = settings.social_analytics if isinstance(settings.social_analytics, dict) else {}
+_ANALYTICS_DEFAULTS = _ANALYTICS_CFG.get("defaults", {}) if isinstance(_ANALYTICS_CFG.get("defaults", {}), dict) else {}
+_ANALYTICS_BEHAVIOR = _ANALYTICS_CFG.get("behavior", {}) if isinstance(_ANALYTICS_CFG.get("behavior", {}), dict) else {}
+_ANALYTICS_PLATFORM_RULES = _ANALYTICS_CFG.get("platform_rules", {}) if isinstance(_ANALYTICS_CFG.get("platform_rules", {}), dict) else {}
+_SOCIAL_ANALYTICS_ROUTE = str(_ANALYTICS_CFG.get("route", "/api/social/analytics"))
+_DEFAULT_ANALYTICS_PERIOD = str(_ANALYTICS_DEFAULTS.get("period", _DEFAULT_SOCIAL_PERIOD))
+_DEFAULT_ANALYTICS_TIMEZONE = str(_ANALYTICS_DEFAULTS.get("timezone", _DEFAULT_SOCIAL_TIMEZONE))
+_DEFAULT_ANALYTICS_TOP_POSTS_LIMIT = int(_ANALYTICS_DEFAULTS.get("top_posts_limit", 10) or 10)
+_ANALYTICS_COMPARE_PREVIOUS_DEFAULT = bool(_ANALYTICS_BEHAVIOR.get("comparison_window", True))
+
+_POSTS_CFG = settings.social_posts if isinstance(settings.social_posts, dict) else {}
+_POSTS_DEFAULTS = _POSTS_CFG.get("defaults", {}) if isinstance(_POSTS_CFG.get("defaults", {}), dict) else {}
+_POSTS_PLATFORM_RULES = _POSTS_CFG.get("platform_rules", {}) if isinstance(_POSTS_CFG.get("platform_rules", {}), dict) else {}
+_SOCIAL_POSTS_ROUTE = str(_POSTS_CFG.get("route", "/api/social/posts"))
+_DEFAULT_POSTS_PERIOD = str(_POSTS_DEFAULTS.get("period", _DEFAULT_SOCIAL_PERIOD))
+_DEFAULT_POSTS_TIMEZONE = str(_POSTS_DEFAULTS.get("timezone", _DEFAULT_SOCIAL_TIMEZONE))
+_DEFAULT_POSTS_SCOPE = str(_POSTS_DEFAULTS.get("scope", "lifetime"))
+_DEFAULT_POSTS_SORT_BY = str(_POSTS_DEFAULTS.get("sort_by", "engagement_total"))
+_DEFAULT_POSTS_LIMIT = int(_POSTS_DEFAULTS.get("limit", 50) or 50)
+
+
+def _platform_rule(rules: dict, platform: str, key: str, default):
+    platform_cfg = rules.get(platform, {}) if isinstance(rules.get(platform, {}), dict) else {}
+    return platform_cfg.get(key, default)
 
 
 def _validate_key(business_key: str) -> None:
@@ -185,14 +215,14 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/api/social/overview")
+@app.get(_SOCIAL_OVERVIEW_ROUTE)
 async def social_overview(
     platform: str = Query(..., min_length=2, max_length=2),
     account_id: str | None = Query(default=None),
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
-    period: str = Query(default="day"),
-    timezone: str = Query(default="UTC"),
+    period: str = Query(default=_DEFAULT_SOCIAL_PERIOD),
+    timezone: str = Query(default=_DEFAULT_SOCIAL_TIMEZONE),
     refresh: bool = Query(default=False),
 ) -> dict:
     """Return one aggregated overview payload for a social platform."""
@@ -239,11 +269,283 @@ async def social_overview(
         print(
             f"social_overview request complete platform={normalized_platform} account_id={account_id} duration_ms={int((datetime.now().timestamp() - request_started_at) * 1000)}"
         )
+        print(f"social_overview payload: {payload}")
         return payload
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get(_SOCIAL_ANALYTICS_ROUTE)
+async def social_analytics_tab(
+    platform: str = Query(..., min_length=2, max_length=2),
+    account_id: str | None = Query(default=None),
+    since: str | None = Query(default=None),
+    until: str | None = Query(default=None),
+    period: str = Query(default=_DEFAULT_ANALYTICS_PERIOD),
+    timezone: str = Query(default=_DEFAULT_ANALYTICS_TIMEZONE),
+    top_posts_limit: int = Query(default=_DEFAULT_ANALYTICS_TOP_POSTS_LIMIT, ge=1, le=50),
+    compare_previous: bool = Query(default=_ANALYTICS_COMPARE_PREVIOUS_DEFAULT),
+    refresh: bool = Query(default=False),
+) -> dict:
+    """Return one aggregated payload for the Analytics tab."""
+    normalized_platform = platform.lower()
+    if normalized_platform not in {"fb", "ig"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+    if period not in _SUPPORTED_SOCIAL_PERIODS:
+        allowed = ", ".join(sorted(_SUPPORTED_SOCIAL_PERIODS))
+        raise HTTPException(status_code=400, detail=f"Unsupported period: {period}. Allowed: {allowed}")
+    if normalized_platform == "ig" and since and until:
+        _validate_instagram_window(since, until)
+
+    include_sections = _platform_rule(_ANALYTICS_PLATFORM_RULES, normalized_platform, "include_sections", [])
+    include_kpis = _platform_rule(_ANALYTICS_PLATFORM_RULES, normalized_platform, "include_kpis", [])
+
+    if not settings.facebook_access_token:
+        return {
+            "tab": "analytics",
+            "meta": {
+                "platform": normalized_platform,
+                "account_id": account_id,
+                "since": since,
+                "until": until,
+                "timezone": timezone,
+                "generated_at": None,
+            },
+            "cards": {},
+            "sections": {},
+            "partial_errors": [],
+        }
+
+    partial_errors: list[dict[str, str]] = []
+
+    try:
+        overview_payload = await build_social_overview(
+            platform=normalized_platform,
+            selected_account_id=account_id,
+            since=since,
+            until=until,
+            period=period,
+            timezone_name=timezone,
+            force_refresh=refresh,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    overview_kpis = overview_payload.get("kpis", {}) if isinstance(overview_payload.get("kpis", {}), dict) else {}
+    cards = {
+        "kpis_window": {
+            key: value for key, value in overview_kpis.items()
+            if (not include_kpis or key in include_kpis)
+        }
+    }
+
+    sections: dict = {}
+    link_to_window = bool(since and until and compare_previous)
+
+    if not include_sections or "engagement_breakdown_window" in include_sections:
+        try:
+            sections["engagement_breakdown_window"] = await social_engagement_breakdown(
+                platform=normalized_platform,
+                account_id=account_id,
+                since=since,
+                until=until,
+                link_to_window=link_to_window,
+            )
+        except Exception as exc:
+            partial_errors.append({"part": "engagement_breakdown_window", "message": str(exc)})
+
+    if not include_sections or "top_performance_posts_window" in include_sections:
+        try:
+            sections["top_performance_posts_window"] = await social_top_posts(
+                platform=normalized_platform,
+                account_id=account_id,
+                since=since,
+                until=until,
+                limit=top_posts_limit,
+                link_to_window=link_to_window,
+            )
+        except Exception as exc:
+            partial_errors.append({"part": "top_performance_posts_window", "message": str(exc)})
+
+    if not include_sections or "engagement_metric_details" in include_sections:
+        breakdown_payload = sections.get("engagement_breakdown_window", {})
+        current_breakdown = breakdown_payload.get("breakdown", {}) if isinstance(breakdown_payload, dict) else {}
+        previous_breakdown = breakdown_payload.get("previous_breakdown", {}) if isinstance(breakdown_payload, dict) else {}
+        metric_keys = ["likes", "comments", "shares", "reposts", "replies", "saves"]
+        rows = []
+        for metric_key in metric_keys:
+            current_value = int(current_breakdown.get(metric_key, 0) or 0)
+            previous_value = int(previous_breakdown.get(metric_key, 0) or 0)
+            diff = current_value - previous_value
+            diff_pct = (diff / previous_value * 100.0) if previous_value > 0 else (100.0 if current_value > 0 else 0.0)
+            rows.append(
+                {
+                    "metric": metric_key,
+                    "current": current_value,
+                    "previous": previous_value,
+                    "change": diff,
+                    "change_pct": round(diff_pct, 2),
+                }
+            )
+        sections["engagement_metric_details"] = {
+            "since": breakdown_payload.get("since") if isinstance(breakdown_payload, dict) else since,
+            "until": breakdown_payload.get("until") if isinstance(breakdown_payload, dict) else until,
+            "rows": rows,
+        }
+
+    return {
+        "tab": "analytics",
+        "meta": {
+            "platform": normalized_platform,
+            "account_id": account_id,
+            "since": since,
+            "until": until,
+            "timezone": timezone,
+            "generated_at": f"{datetime.utcnow().isoformat()}Z",
+        },
+        "cards": cards,
+        "sections": sections,
+        "partial_errors": partial_errors,
+    }
+
+
+@app.get(_SOCIAL_POSTS_ROUTE)
+async def social_posts_tab(
+    platform: str = Query(..., min_length=2, max_length=2),
+    account_id: str | None = Query(default=None),
+    since: str | None = Query(default=None),
+    until: str | None = Query(default=None),
+    period: str = Query(default=_DEFAULT_POSTS_PERIOD),
+    timezone: str = Query(default=_DEFAULT_POSTS_TIMEZONE),
+    scope: str = Query(default=_DEFAULT_POSTS_SCOPE),
+    sort_by: str = Query(default=_DEFAULT_POSTS_SORT_BY),
+    limit: int = Query(default=_DEFAULT_POSTS_LIMIT, ge=1, le=200),
+    page: int = Query(default=1, ge=1),
+) -> dict:
+    """Return one aggregated payload for the Posts tab."""
+    normalized_platform = platform.lower()
+    if normalized_platform not in {"fb", "ig"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+    if period not in _SUPPORTED_SOCIAL_PERIODS:
+        allowed = ", ".join(sorted(_SUPPORTED_SOCIAL_PERIODS))
+        raise HTTPException(status_code=400, detail=f"Unsupported period: {period}. Allowed: {allowed}")
+    if normalized_platform == "ig" and since and until:
+        _validate_instagram_window(since, until)
+
+    include_sections = _platform_rule(_POSTS_PLATFORM_RULES, normalized_platform, "include_sections", [])
+    include_cards = _platform_rule(_POSTS_PLATFORM_RULES, normalized_platform, "include_cards", [])
+
+    if not settings.facebook_access_token:
+        return {
+            "tab": "posts",
+            "meta": {
+                "platform": normalized_platform,
+                "account_id": account_id,
+                "since": since,
+                "until": until,
+                "timezone": timezone,
+                "scope": scope,
+                "generated_at": None,
+            },
+            "cards": {},
+            "sections": {},
+            "partial_errors": [],
+        }
+
+    if normalized_platform == "ig" and not account_id:
+        raise HTTPException(status_code=400, detail="account_id is required for posts tab.")
+
+    partial_errors: list[dict[str, str]] = []
+    posts_payload: dict = {
+        "platform": normalized_platform,
+        "account_id": account_id,
+        "scope": scope,
+        "posts": [],
+    }
+
+    try:
+        if scope == "lifetime":
+            posts_payload = await social_posts_metrics(platform=normalized_platform, account_id=account_id)
+        else:
+            posts_payload = await social_top_posts(
+                platform=normalized_platform,
+                account_id=account_id,
+                since=since,
+                until=until,
+                limit=limit,
+                link_to_window=bool(since and until),
+            )
+    except Exception as exc:
+        partial_errors.append({"part": "all_posts_table", "message": str(exc)})
+
+    posts = posts_payload.get("posts", []) if isinstance(posts_payload.get("posts", []), list) else []
+
+    sortable_fields = {
+        "engagement_total": lambda row: float(row.get("engagement_total", 0) or 0),
+        "reach": lambda row: float(row.get("reach", 0) or 0),
+        "created_at": lambda row: row.get("created_at", "") or "",
+    }
+    sorter = sortable_fields.get(sort_by, sortable_fields["engagement_total"])
+    sorted_posts = sorted(posts, key=sorter, reverse=True)
+
+    start = (page - 1) * limit
+    end = start + limit
+    paged_posts = sorted_posts[start:end]
+
+    total_posts = len(posts)
+    total_engagement = sum(float(row.get("engagement_total", 0) or 0) for row in posts)
+    avg_engagement_rate = (
+        sum(float(row.get("engagement_rate", 0) or 0) for row in posts) / total_posts
+        if total_posts > 0
+        else 0.0
+    )
+
+    cards_all = {
+        "total_posts": total_posts,
+        "total_engagement": int(total_engagement),
+        "avg_engagement_rate": round(avg_engagement_rate, 4),
+    }
+    cards = {k: v for k, v in cards_all.items() if (not include_cards or k in include_cards)}
+
+    type_counts: dict[str, int] = {}
+    for row in posts:
+        media_type = str(row.get("type", "other") or "other").strip().lower()
+        type_counts[media_type] = type_counts.get(media_type, 0) + 1
+
+    sections: dict = {}
+    if not include_sections or "all_posts_table" in include_sections:
+        sections["all_posts_table"] = {
+            "total": total_posts,
+            "rows": paged_posts,
+        }
+    if not include_sections or "posts_type_breakdown" in include_sections:
+        sections["posts_type_breakdown"] = type_counts
+    if not include_sections or "pagination" in include_sections:
+        sections["pagination"] = {
+            "page": page,
+            "limit": limit,
+            "total": total_posts,
+            "has_next": end < total_posts,
+        }
+
+    return {
+        "tab": "posts",
+        "meta": {
+            "platform": normalized_platform,
+            "account_id": account_id,
+            "since": since,
+            "until": until,
+            "timezone": timezone,
+            "period": period,
+            "scope": scope,
+            "generated_at": f"{datetime.utcnow().isoformat()}Z",
+        },
+        "cards": cards,
+        "sections": sections,
+        "partial_errors": partial_errors,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +575,18 @@ async def facebook_pages(
             data = await get_pages_field(*fields)
             return {"pages": data}
         pages = await get_pages()
-        return {"pages": [{"id": p.id, "name": p.name} for p in pages]}
+        return {
+            "pages": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "picture_url": p.picture_url,
+                    "followers_count": getattr(p, "followers_count", 0),
+                    "fan_count": getattr(p, "fan_count", 0),
+                }
+                for p in pages
+            ]
+        }
     except AttributeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -317,6 +630,9 @@ async def instagram_accounts() -> dict:
                     "name": account.name,
                     "username": account.username,
                     "picture_url": account.profile_picture_url,
+                    "followers_count": account.followers_count,
+                    "follows_count": account.follows_count,
+                    "media_count": account.media_count,
                     "page_id": account.page_id,
                     "page_name": account.page_name,
                 }

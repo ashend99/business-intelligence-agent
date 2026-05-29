@@ -6,18 +6,50 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from mcp.facebook.analytics import get_pages, get_reach_by_page_id
-from mcp.instagram.analytics import (
+from mcp_server.facebook.analytics import get_pages, get_posts_count_by_page_id, get_reach_by_page_id
+from mcp_server.instagram.analytics import (
     get_accounts,
+    get_engagement_breakdown_by_account_id,
     get_overview_metrics_by_account_id,
     get_reach_timeseries_by_account_id,
+    get_posts_metrics_by_account_id,
     get_top_posts_by_account_id,
 )
+from config.settings import settings
 
-CACHE_TTL_SECONDS = 120
+_OVERVIEW_CONFIG = settings.social_overview if isinstance(settings.social_overview, dict) else {}
+_OVERVIEW_DEFAULTS = _OVERVIEW_CONFIG.get("defaults", {}) if isinstance(_OVERVIEW_CONFIG.get("defaults", {}), dict) else {}
+_OVERVIEW_BEHAVIOR = _OVERVIEW_CONFIG.get("behavior", {}) if isinstance(_OVERVIEW_CONFIG.get("behavior", {}), dict) else {}
+_OVERVIEW_PLATFORM_RULES = _OVERVIEW_CONFIG.get("platform_rules", {}) if isinstance(_OVERVIEW_CONFIG.get("platform_rules", {}), dict) else {}
+
+CACHE_TTL_SECONDS = int(_OVERVIEW_BEHAVIOR.get("cache_ttl_seconds", 120) or 120)
+# Keep overview caching disabled for now so every tab load gets fresh data.
 ENABLE_OVERVIEW_CACHE = False
+ENABLE_COMPARISON_WINDOW = bool(_OVERVIEW_BEHAVIOR.get("comparison_window", True))
+CHART_DAYS = max(int(_OVERVIEW_DEFAULTS.get("chart_days", 30) or 30), 1)
+TOP_POSTS_LIMIT = max(int(_OVERVIEW_DEFAULTS.get("top_posts_limit", 10) or 10), 1)
 _CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 logger = logging.getLogger(__name__)
+
+
+def _platform_rule(platform: str, key: str, default: Any) -> Any:
+    platform_cfg = _OVERVIEW_PLATFORM_RULES.get(platform, {}) if isinstance(_OVERVIEW_PLATFORM_RULES.get(platform, {}), dict) else {}
+    return platform_cfg.get(key, default)
+
+
+def _section_enabled(platform: str, section_name: str) -> bool:
+    include_sections = _platform_rule(platform, "include_sections", [])
+    if not isinstance(include_sections, list) or not include_sections:
+        return True
+    return section_name in include_sections
+
+
+def _filter_kpis_for_platform(platform: str, kpis: dict[str, Any]) -> dict[str, Any]:
+    include_kpis = _platform_rule(platform, "include_kpis", [])
+    if not isinstance(include_kpis, list) or not include_kpis:
+        return kpis
+    allowed = {str(item) for item in include_kpis}
+    return {name: value for name, value in kpis.items() if name in allowed}
 
 
 def _log_step_duration(step: str, started_at: float, **details: Any) -> None:
@@ -72,7 +104,7 @@ def _compute_previous_window_bounds(
 
 def _last_30_day_window_bounds() -> tuple[datetime, datetime]:
     until_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    since_date = until_date - timedelta(days=29)
+    since_date = until_date - timedelta(days=CHART_DAYS - 1)
     return since_date, until_date
 
 
@@ -407,19 +439,21 @@ async def build_social_overview(
             selected = accounts[0]
 
         reach: dict[str, Any] | None = None
+        posts_count_metric: dict[str, Any] | None = None
         chart_reach: dict[str, Any] | None = None
         audience: dict[str, Any] = {}
         posts: list[dict[str, Any]] = []
         if selected is not None:
             metrics_started_at = time.perf_counter()
             chart_since, chart_until = _last_30_day_window_bounds()
-            reach_result, chart_reach_result, audience_result, posts_result = await asyncio.gather(
+            reach_result, posts_count_result, chart_reach_result, audience_result, posts_result = await asyncio.gather(
                 get_reach_by_page_id(
                     selected["id"],
                     since=parsed_since,
                     until=parsed_until,
                     period=period,
                 ),
+                get_posts_count_by_page_id(selected["id"]),
                 get_reach_by_page_id(
                     selected["id"],
                     since=chart_since,
@@ -438,7 +472,7 @@ async def build_social_overview(
                 current_since = since or reach.get("since")
                 current_until = until or reach.get("until")
                 previous_window = _compute_previous_window_bounds(current_since, current_until)
-                if previous_window is not None:
+                if ENABLE_COMPARISON_WINDOW and previous_window is not None:
                     prev_since, prev_until = previous_window
                     try:
                         previous_started_at = time.perf_counter()
@@ -466,6 +500,11 @@ async def build_social_overview(
             else:
                 chart_reach = chart_reach_result
 
+            if isinstance(posts_count_result, Exception):
+                partial_errors.append(f"posts_count: {posts_count_result}")
+            else:
+                posts_count_metric = posts_count_result
+
             if isinstance(audience_result, Exception):
                 partial_errors.append(f"audience: {audience_result}")
             else:
@@ -478,19 +517,35 @@ async def build_social_overview(
 
         merge_started_at = time.perf_counter()
         kpis = _build_kpi_bundle(reach, period)
+        if posts_count_metric is not None:
+            kpis["posts_count"] = posts_count_metric
+        if selected is not None:
+            kpis["account_profile"] = {
+                "followers_count": selected.get("followers_count", 0),
+                "fan_count": selected.get("fan_count", 0),
+                "media_count": int((posts_count_metric or {}).get("total_count", 0) or 0),
+            }
+        kpis = _filter_kpis_for_platform(platform, kpis)
         charts = _build_charts(kpis, chart_reach)
         _log_step_duration("build_kpis_and_charts", merge_started_at, platform=platform)
 
-        payload = {
-            "platform": platform,
+        payload_sections: dict[str, Any] = {
             "summary": {
                 "accounts": accounts,
                 "selected_account": selected,
             },
             "kpis": kpis,
-            "charts": charts,
-            "audience": audience,
-            "posts": posts,
+        }
+        if _section_enabled(platform, "charts"):
+            payload_sections["charts"] = charts
+        if _section_enabled(platform, "audience"):
+            payload_sections["audience"] = audience
+        if _section_enabled(platform, "posts"):
+            payload_sections["posts"] = posts
+
+        payload = {
+            "platform": platform,
+            **payload_sections,
             "meta": {
                 "partial_errors": partial_errors,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -534,10 +589,12 @@ async def build_social_overview(
         chart_reach_metric: dict[str, Any] | None = None
         audience: dict[str, Any] = {}
         posts: list[dict[str, Any]] = []
+        posts_metrics: list[dict[str, Any]] = []
+        engagement_breakdown: dict[str, Any] = {}
         if selected is not None:
             metrics_started_at = time.perf_counter()
             chart_since, chart_until = _last_30_day_window_bounds()
-            current_metrics_result, chart_reach_result, audience_result, posts_result = await asyncio.gather(
+            current_metrics_result, chart_reach_result, audience_result, posts_result, posts_metrics_result, engagement_breakdown_result = await asyncio.gather(
                 get_overview_metrics_by_account_id(
                     selected["id"],
                     since=parsed_since,
@@ -555,7 +612,13 @@ async def build_social_overview(
                     selected["id"],
                     since=parsed_since,
                     until=parsed_until,
-                    limit=10,
+                    limit=TOP_POSTS_LIMIT,
+                ),
+                get_posts_metrics_by_account_id(selected["id"]),
+                get_engagement_breakdown_by_account_id(
+                    selected["id"],
+                    since=parsed_since,
+                    until=parsed_until,
                 ),
                 return_exceptions=True,
             )
@@ -572,7 +635,7 @@ async def build_social_overview(
                 current_since = since or (reach or {}).get("since")
                 current_until = until or (reach or {}).get("until")
                 previous_window = _compute_previous_window_bounds(current_since, current_until)
-                if previous_window is not None:
+                if ENABLE_COMPARISON_WINDOW and previous_window is not None:
                     prev_since, prev_until = previous_window
                     try:
                         previous_started_at = time.perf_counter()
@@ -623,6 +686,16 @@ async def build_social_overview(
             else:
                 posts = posts_result
 
+            if isinstance(posts_metrics_result, Exception):
+                partial_errors.append(f"posts_metrics: {posts_metrics_result}")
+            else:
+                posts_metrics = posts_metrics_result
+
+            if isinstance(engagement_breakdown_result, Exception):
+                partial_errors.append(f"engagement_breakdown: {engagement_breakdown_result}")
+            else:
+                engagement_breakdown = engagement_breakdown_result
+
         merge_started_at = time.perf_counter()
         kpis = _build_kpi_bundle_for_period(
             reach,
@@ -662,19 +735,37 @@ async def build_social_overview(
             previous_reach,
             period,
         )
+        if selected is not None:
+            kpis["account_profile"] = {
+                "followers_count": selected.get("followers_count", 0),
+                "follows_count": selected.get("follows_count", 0),
+                "media_count": selected.get("media_count", 0),
+            }
+        kpis = _filter_kpis_for_platform(platform, kpis)
         charts = _build_charts(kpis, chart_reach_metric)
         _log_step_duration("build_kpis_and_charts", merge_started_at, platform=platform)
 
-        payload = {
-            "platform": platform,
+        payload_sections: dict[str, Any] = {
             "summary": {
                 "accounts": accounts,
                 "selected_account": selected,
             },
             "kpis": kpis,
-            "charts": charts,
-            "audience": audience,
-            "posts": posts,
+        }
+        if _section_enabled(platform, "charts"):
+            payload_sections["charts"] = charts
+        if _section_enabled(platform, "audience"):
+            payload_sections["audience"] = audience
+        if _section_enabled(platform, "posts"):
+            payload_sections["posts"] = posts
+        if platform == "ig" and _section_enabled(platform, "posts"):
+            payload_sections["posts_metrics"] = posts_metrics
+        if platform == "ig" and _section_enabled(platform, "charts"):
+            payload_sections["engagement_breakdown"] = engagement_breakdown
+
+        payload = {
+            "platform": platform,
+            **payload_sections,
             "meta": {
                 "partial_errors": partial_errors,
                 "generated_at": datetime.now(timezone.utc).isoformat(),

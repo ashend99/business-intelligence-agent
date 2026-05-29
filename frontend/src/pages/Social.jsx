@@ -166,15 +166,16 @@ function PageDropdown({ pages, value, onChange, loading, tone }) {
 // Sub-nav tabs (replaces the standalone page's own sidebar sections)
 // ---------------------------------------------------------------------------
 const TABS = [
-  { id: 'overview',     label: 'Overview'     },
-  { id: 'analytics',   label: 'Analytics'    },
-  { id: 'posts',       label: 'Posts'        },
+  { id: 'overview', label: 'Overview' },
+  { id: 'analytics', label: 'Analytics' },
+  { id: 'posts', label: 'Posts' },
 ]
 
 const METRICS_REFRESH_INTERVAL_MS = 600_000
 const DEFAULT_WINDOW_UNIT = 'day'
 const DEFAULT_WINDOW_COUNT = 7
 const SOCIAL_UI_STORAGE_KEY = 'bi.social.ui.v1'
+const SOCIAL_ACCOUNTS_STORAGE_KEY = 'bi.social.accounts.v1'
 
 const _readSocialUiState = () => {
   try {
@@ -191,6 +192,33 @@ const _writeSocialUiState = (patch) => {
   try {
     const current = _readSocialUiState()
     localStorage.setItem(SOCIAL_UI_STORAGE_KEY, JSON.stringify({ ...current, ...patch }))
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+const _readSocialAccountsCache = () => {
+  try {
+    const raw = localStorage.getItem(SOCIAL_ACCOUNTS_STORAGE_KEY)
+    if (!raw) return { fb: [], ig: [] }
+    const parsed = JSON.parse(raw)
+    return {
+      fb: Array.isArray(parsed?.fb) ? parsed.fb : [],
+      ig: Array.isArray(parsed?.ig) ? parsed.ig : [],
+    }
+  } catch {
+    return { fb: [], ig: [] }
+  }
+}
+
+const _writeSocialAccountsCache = (accountsByPlatform) => {
+  try {
+    const current = _readSocialAccountsCache()
+    const next = {
+      fb: Array.isArray(accountsByPlatform?.fb) ? accountsByPlatform.fb : current.fb,
+      ig: Array.isArray(accountsByPlatform?.ig) ? accountsByPlatform.ig : current.ig,
+    }
+    localStorage.setItem(SOCIAL_ACCOUNTS_STORAGE_KEY, JSON.stringify(next))
   } catch {
     // Ignore storage errors.
   }
@@ -223,15 +251,6 @@ const PERIOD_OPTIONS = [
   { value: 'lifetime', label: 'Lifetime' },
   { value: 'total_over_range', label: 'Total Over Range' },
 ]
-
-const _formatCompact = (value) => {
-  const numeric = Number(value || 0)
-  if (!Number.isFinite(numeric) || numeric <= 0) return '0'
-  if (numeric >= 1_000_000) return `${(numeric / 1_000_000).toFixed(1)}M`
-  if (numeric >= 1_000) return `${(numeric / 1_000).toFixed(1)}K`
-  return `${Math.round(numeric)}`
-}
-
 const _formatPostTimestamp = (isoValue) => {
   if (!isoValue) return '—'
   const parsed = new Date(isoValue)
@@ -266,6 +285,17 @@ const _formatDateRangeShort = (sinceIso, untilIso) => {
   return `${fmt.format(sinceDate)} - ${fmt.format(untilDate)}`
 }
 
+const _formatCompact = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '0'
+
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    compactDisplay: 'short',
+    maximumFractionDigits: 1,
+  }).format(num)
+}
+
 const _shiftIsoDate = (isoDate, days) => {
   if (!isoDate) return null
   const date = new Date(`${isoDate}T00:00:00`)
@@ -292,7 +322,7 @@ function Section({ title, subtitle, right, children, style }) {
   )
 }
 
-function GranularitySelect({ value = OVERVIEW_PERIOD, onChange }) {
+function GranularitySelect({ value = 'day', onChange }) {
   const current = PERIOD_OPTIONS.find(option => option.value === value)
 
   return (
@@ -615,62 +645,41 @@ function AnalyticsContent({
   const profileLinksTapsMetric = kpis?.profile_links_taps || null
   const engagementRateMetric = kpis?.engagement_rate || null
 
-  const overviewFirstRow = useMemo(() => {
-    const followersRaw = platform === 'ig'
-      ? Number(selectedAccount?.followers_count ?? kpis?.followers?.total_count)
-      : Number(selectedAccount?.followers_count ?? selectedAccount?.fan_count ?? kpis?.followers?.total_count)
-
-    const followingRaw = platform === 'ig'
-      ? Number(selectedAccount?.follows_count)
-      : Number.NaN
-
-    const postsRaw = platform === 'ig'
-      ? Number(selectedAccount?.media_count)
-      : Number.NaN
-
-    const formatOrNull = (n) => (Number.isFinite(n) ? new Intl.NumberFormat().format(Math.max(0, Math.round(n))) : null)
-
-    return [
-      { key: 'followers', label: 'Followers', value: formatOrNull(followersRaw), unavailable: !Number.isFinite(followersRaw) },
-      { key: 'following', label: 'Following', value: formatOrNull(followingRaw), unavailable: !Number.isFinite(followingRaw) },
-      { key: 'posts', label: 'Posts', value: formatOrNull(postsRaw), unavailable: !Number.isFinite(postsRaw) },
-    ]
-  }, [platform, selectedAccount, kpis])
+  const _makeCard = (key, label, metric) => ({
+    key,
+    label,
+    value: metric?.value ?? null,
+    unavailable: metric?.value === null || metric?.value === undefined,
+  })
 
   const overviewSecondRow = useMemo(() => {
-    // Use insights API total_value metrics for 30-day rolling window
-    const reachData = overviewInsights?.reach
-    const viewsData = overviewInsights?.views
-    const engagementData = overviewInsights?.engagement
-    const engagementRateData = overviewInsights?.engagement_rate
-    const engagedAccountsData = kpis?.engaged_accounts
+    const cards = [
+      _makeCard('reach', 'Reach', reachMetric),
+      _makeCard('views', 'Views', viewsMetric),
+      _makeCard('engagement', 'Engagement', engagementMetric),
+      _makeCard('engaged_accounts', 'Engaged Accounts', engagedAccountsMetric),
+      _makeCard('engagement_rate', 'Engagement Rate', engagementRateMetric),
+    ]
 
-    const hasValue = (data) => data?.value !== null && data?.value !== undefined
-
-    const formatValue = (data, isRate = false) => {
-      if (!hasValue(data)) return null
-      const val = Number(data.value)
-      if (!Number.isFinite(val)) return null
-      if (isRate) return `${val.toFixed(2)}%`
-      return new Intl.NumberFormat().format(Math.round(val))
+    if (platform === 'ig') {
+      cards.push(
+        _makeCard('follows_and_unfollows', 'Follows & Unfollows', followsAndUnfollowsMetric),
+        _makeCard('profile_links_taps', 'Profile Link Taps', profileLinksTapsMetric),
+      )
     }
 
-    return [
-      { key: 'reach', label: 'Reach (30d)', value: formatValue(reachData), unavailable: !hasValue(reachData) },
-      { key: 'views', label: 'Views (30d)', value: formatValue(viewsData), unavailable: !hasValue(viewsData) || platform !== 'ig' },
-      { key: 'engagement', label: 'Engagement (30d)', value: formatValue(engagementData), unavailable: !hasValue(engagementData) },
-      {
-        key: 'engaged_accounts',
-        label: 'Engaged Accounts (30d)',
-        value: engagedAccountsData?.value ?? null,
-        unavailable: (engagedAccountsData?.value === null || engagedAccountsData?.value === undefined) || platform !== 'ig',
-      },
-      { key: 'engagement_rate', label: 'Eng. Rate (30d)', value: formatValue(engagementRateData, true), unavailable: !hasValue(engagementRateData) },
-    ]
-  }, [overviewInsights, kpis, platform])
+    if (kpis?.video_views) {
+      cards.push(_makeCard('video_views', 'Video Views', kpis.video_views))
+    }
 
-  const performanceSeries = charts?.performance_overview?.every(s => Array.isArray(s?.points) && s.points.length)
+    return cards.filter(card => card.value !== null && card.value !== undefined)
+  }, [engagementMetric, engagedAccountsMetric, engagementRateMetric, followsAndUnfollowsMetric, kpis, platform, profileLinksTapsMetric, reachMetric, viewsMetric])
+
+  const performanceOverviewSeries = Array.isArray(charts?.performance_overview)
     ? charts.performance_overview
+    : []
+  const performanceSeries = performanceOverviewSeries.length > 0 && performanceOverviewSeries.every(s => Array.isArray(s?.points) && s.points.length)
+    ? performanceOverviewSeries
     : [
       { name: 'Reach', color: '#4A8CFF', points: Array.isArray(reachMetric?.spark) ? reachMetric.spark : [] },
     ]
@@ -897,13 +906,53 @@ function AnalyticsContent({
     }))
   }, [audienceDemographics])
 
+  const overviewFollowersMetric = kpis?.followers || null
+  const overviewPostsCount = kpis?.posts_count || null
+
+  const formatOrNull = (value) => {
+    const num = Number(value)
+    return Number.isFinite(num) ? new Intl.NumberFormat().format(Math.max(0, Math.round(num))) : null
+  }
+
+  const overviewFirstRow = useMemo(() => {
+    const accountProfile = kpis?.account_profile || null
+
+    if (platform === 'ig') {
+      const followersRaw = accountProfile?.followers_count
+      const followingRaw = accountProfile?.follows_count
+      const postsRaw = accountProfile?.media_count
+
+      return [
+        { key: 'followers', label: 'Followers', value: formatOrNull(followersRaw), unavailable: !Number.isFinite(Number(followersRaw)) },
+        { key: 'following', label: 'Following', value: formatOrNull(followingRaw), unavailable: !Number.isFinite(Number(followingRaw)) },
+        { key: 'posts', label: 'Posts', value: formatOrNull(postsRaw), unavailable: !Number.isFinite(Number(postsRaw)) },
+      ]
+    }
+
+    const followersRaw = accountProfile?.followers_count
+    const likesRaw = accountProfile?.fan_count
+    const postsRaw = accountProfile?.media_count ?? overviewPostsCount?.total_count
+
+    return [
+      { key: 'followers', label: 'Followers', value: formatOrNull(followersRaw), unavailable: !Number.isFinite(Number(followersRaw)) },
+      { key: 'page_likes', label: 'Page Likes', value: formatOrNull(likesRaw), unavailable: !Number.isFinite(Number(likesRaw)) },
+      { key: 'posts', label: 'Posts', value: formatOrNull(postsRaw), unavailable: !Number.isFinite(Number(postsRaw)) },
+    ]
+  }, [kpis, overviewPostsCount, platform])
+
+  const overviewCardGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: 14,
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* Overview tab: total-value basics */}
       {tab === 'overview' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(overviewFirstRow.length, 1)}, minmax(0, 1fr))`, gap: 14 }}>
             {overviewFirstRow.map(metric => (
               <SnapshotMetricCard
                 key={metric.key}
@@ -913,7 +962,7 @@ function AnalyticsContent({
               />
             ))}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 14 }}>
+          <div style={overviewCardGridStyle}>
             {overviewSecondRow.map(metric => (
               <SnapshotMetricCard
                 key={metric.key}
@@ -924,7 +973,7 @@ function AnalyticsContent({
             ))}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: platform === 'ig' ? 'repeat(3, minmax(0, 1fr))' : 'repeat(1, minmax(0, 1fr))', gap: 14 }}>
             <Section title="Performance Overview" subtitle="Daily reach for last 30 days" style={{ padding: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                 {/* <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)' }}>
@@ -942,6 +991,7 @@ function AnalyticsContent({
               </div>
             </Section>
 
+            {platform === 'ig' && (
             <Section title="Posts Breakdown" subtitle="lifetime" style={{ padding: 16 }}>
               {allPostsLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading posts breakdown...</div>
@@ -974,7 +1024,9 @@ function AnalyticsContent({
                 </div>
               )}
             </Section>
+            )}
 
+            {platform === 'ig' && (
             <Section title="Engagement Breakdown" subtitle="last 30 days" style={{ padding: 16 }}>
               {engagementBreakdownLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading engagement breakdown...</div>
@@ -1005,9 +1057,11 @@ function AnalyticsContent({
                 </div>
               )}
             </Section>
+            )}
           </div>
 
           {/* Audience demographics row */}
+          {platform === 'ig' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14 }}>
 
             {/* Age Distribution donut */}
@@ -1161,6 +1215,7 @@ function AnalyticsContent({
             </Section>
 
           </div>
+          )}
         </div>
       )}
 
@@ -1352,7 +1407,7 @@ function AnalyticsContent({
       {tab === 'posts' && (
         <div className="panel" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '22px 22px 0', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>All Posts (Lifetime)</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>All Posts</div>
           </div>
           <div className="scroll-y" style={{ maxHeight: 520 }}>
             <table className="dense compact" style={{ width: '100%', tableLayout: 'fixed' }}>
@@ -1436,9 +1491,9 @@ function AnalyticsContent({
 }
 
 // ---------------------------------------------------------------------------
-// FacebookAnalytics — exported page component
+// Social — exported page component
 // ---------------------------------------------------------------------------
-export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false }) {
+export function Social({ initialPlatform = 'fb', lockPlatform = false }) {
   const [tab, setTab] = useState(() => {
     const saved = _readSocialUiState().tab
     return TABS.some(t => t.id === saved) ? saved : 'overview'
@@ -1482,7 +1537,6 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
       ? savedCount
       : DEFAULT_WINDOW_COUNT
   })
-  const skipNextAccountFetchRef = useRef(null)
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
@@ -1505,89 +1559,63 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
     }
   }, [windowUnit, windowCount])
 
+  const { overviewSince, overviewUntil } = useMemo(() => {
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - 29) // fixed 30-day range for overview KPIs and charts
+    return { overviewSince: _toIsoDate(start), overviewUntil: _toIsoDate(end) }
+  }, [])
+
   const buildOverviewUrl = (extra = {}) => {
     const params = new URLSearchParams({
       platform,
-      period,
-      since,
-      until,
+      period: 'day',
+      since: overviewSince,
+      until: overviewUntil,
       timezone,
       ...extra,
     })
     return `/api/social/overview?${params.toString()}`
   }
 
-  const buildAllPostsUrl = () => {
+  const buildAnalyticsTabUrl = () => {
     const params = new URLSearchParams({
       platform,
       account_id: selectedPage?.id || '',
-    })
-    return `/api/social/posts-metrics?${params.toString()}`
-  }
-
-  const buildTopPostsWindowUrl = () => {
-    const params = new URLSearchParams({
-      platform,
-      account_id: selectedPage?.id || '',
-      limit: '10',
-      link_to_window: 'true',
       since,
       until,
+      period,
+      timezone,
+      top_posts_limit: '10',
+      compare_previous: 'true',
     })
-    return `/api/social/top-posts?${params.toString()}`
+    return `/api/social/analytics?${params.toString()}`
   }
 
-  const buildAudienceDemographicsUrl = () => {
+  const buildPostsTabUrl = () => {
     const params = new URLSearchParams({
       platform,
       account_id: selectedPage?.id || '',
-    })
-    return `/api/social/audience-demographics?${params.toString()}`
-  }
-
-  const buildEngagementBreakdownUrl = () => {
-    const params = new URLSearchParams({
-      platform,
-      account_id: selectedPage?.id || '',
-      link_to_window: 'true',
       since,
       until,
+      period,
+      timezone,
+      scope: 'lifetime',
+      sort_by: 'engagement_total',
+      limit: '200',
+      page: '1',
     })
-    return `/api/social/engagement-breakdown?${params.toString()}`
+    return `/api/social/posts?${params.toString()}`
   }
 
-  const buildInsightsUrl = (metric, metricType = 'total_value') => {
-    const now = new Date()
-    const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const startDate = new Date(endDate)
-    startDate.setDate(startDate.getDate() - 29) // 30 days inclusive (today - 29 days back)
-    const params = new URLSearchParams({
-      metric,
-      period: 'day',
-      metric_type: metricType,
-      since: _toIsoDate(startDate),
-      until: _toIsoDate(endDate),
-      account_id: selectedPage?.id || '',
-      platform,
-    })
-    return `/api/social/insights?${params.toString()}`
-  }
-
-  const buildInsightsBatchUrl = (metricType = 'total_value') => {
-    const now = new Date()
-    const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const startDate = new Date(endDate)
-    startDate.setDate(startDate.getDate() - 29) // 30 days inclusive (today - 29 days back)
-    const params = new URLSearchParams({
-      metrics: 'reach,views,engagement,engagement_rate',
-      period: 'day',
-      metric_type: metricType,
-      since: _toIsoDate(startDate),
-      until: _toIsoDate(endDate),
-      account_id: selectedPage?.id || '',
-      platform,
-    })
-    return `/api/social/insights?${params.toString()}`
+  const buildAccountsUrl = () => {
+    if (platform === 'fb') {
+      return '/api/social/facebook/pages'
+    }
+    if (platform === 'ig') {
+      return '/api/social/instagram/accounts'
+    }
+    return null
   }
 
   useEffect(() => {
@@ -1598,16 +1626,6 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
       windowCount,
     })
   }, [tab, platform, windowUnit, windowCount])
-
-  useEffect(() => {
-    if (!selectedPage?.id) return
-    const saved = _readSocialUiState()
-    const nextSelectedIds = {
-      ...(saved.selectedAccountIds || {}),
-      [platform]: selectedPage.id,
-    }
-    _writeSocialUiState({ selectedAccountIds: nextSelectedIds })
-  }, [platform, selectedPage?.id])
 
   useEffect(() => {
     setReachMetric(null)
@@ -1625,6 +1643,7 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
     setEngagementBreakdown(null)
     setEngagementBreakdownLoading(false)
     setSelectedPage(null)
+
     if (platform === 'tk') {
       setFbPages([])
       setIgAccounts([])
@@ -1632,52 +1651,63 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
       return
     }
 
+    const accountsUrl = buildAccountsUrl()
+    if (!accountsUrl) {
+      setPagesLoading(false)
+      return
+    }
+
+    let disposed = false
     setPagesLoading(true)
-    setReachLoading(true)
-    fetch(buildOverviewUrl({ refresh: 'true' }), { cache: 'no-store' })
-      .then(r => r.json())
+
+    fetch(accountsUrl, { cache: 'no-store' })
+      .then(async r => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}))
+          throw new Error(body.detail || 'Failed to load accounts')
+        }
+        return r.json()
+      })
       .then(payload => {
-        const items = payload?.summary?.accounts || []
-        const saved = _readSocialUiState()
-        const preferredId = saved?.selectedAccountIds?.[platform]
-        const preferredAccount = items.find(item => item.id === preferredId)
-        const nextSelected = preferredAccount || payload?.summary?.selected_account || items[0] || null
+        if (disposed) return
+        const items = Array.isArray(payload?.pages)
+          ? payload.pages
+          : Array.isArray(payload?.accounts)
+            ? payload.accounts
+            : []
+
         if (platform === 'fb') {
           setFbPages(items)
         } else {
           setIgAccounts(items)
         }
-        skipNextAccountFetchRef.current = nextSelected?.id || null
-        setSelectedPage(nextSelected)
-        setOverviewKpis(payload?.kpis || {})
-        setOverviewCharts(payload?.charts || {})
-        setReachMetric(payload?.kpis?.reach || null)
+        setSelectedPage(items[0] || null)
       })
       .catch(() => {
-        setFbPages([])
-        setIgAccounts([])
-        setSelectedPage(null)
-        setOverviewKpis({})
-        setOverviewCharts({})
-        setAllPosts([])
-        setEngagementBreakdown(null)
-        setAudienceDemographics(null)
-        setReachMetric(null)
+        if (disposed) return
+        const cachedAccounts = _readSocialAccountsCache()
+        setFbPages(Array.isArray(cachedAccounts.fb) ? cachedAccounts.fb : [])
+        setIgAccounts(Array.isArray(cachedAccounts.ig) ? cachedAccounts.ig : [])
+        setSelectedPage((platform === 'fb' ? cachedAccounts.fb : cachedAccounts.ig)?.[0] || null)
       })
       .finally(() => {
-        setPagesLoading(false)
-        setReachLoading(false)
+        if (!disposed) {
+          setPagesLoading(false)
+        }
       })
+
+    return () => {
+      disposed = true
+    }
   }, [platform])
 
   useEffect(() => {
-    if (platform === 'tk' || !selectedPage?.id) {
-      return
-    }
-
-    // Skip the immediate follow-up fetch after initial platform bootstrap.
-    if (skipNextAccountFetchRef.current === selectedPage.id) {
-      skipNextAccountFetchRef.current = null
+    if (tab !== 'overview' || platform === 'tk' || !selectedPage?.id) {
+      setOverviewKpis({})
+      setOverviewCharts({})
+      setAllPosts([])
+      setEngagementBreakdown(null)
+      setReachMetric(null)
       return
     }
 
@@ -1689,7 +1719,7 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
       .then(async r => {
         if (!r.ok) {
           const body = await r.json().catch(() => ({}))
-          throw new Error(body.detail || 'Failed to refresh overview')
+          throw new Error(body.detail || 'Failed to load overview payload')
         }
         return r.json()
       })
@@ -1697,12 +1727,16 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
         if (disposed) return
         setOverviewKpis(payload?.kpis || {})
         setOverviewCharts(payload?.charts || {})
+        setAllPosts(Array.isArray(payload?.posts_metrics) ? payload.posts_metrics : Array.isArray(payload?.posts_metrics?.posts) ? payload.posts_metrics.posts : [])
+        setEngagementBreakdown(payload?.engagement_breakdown || null)
         setReachMetric(payload?.kpis?.reach || null)
       })
       .catch(err => {
         if (err.name !== 'AbortError' && !disposed) {
           setOverviewKpis({})
           setOverviewCharts({})
+          setAllPosts([])
+          setEngagementBreakdown(null)
           setReachMetric(null)
         }
       })
@@ -1716,180 +1750,11 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
       disposed = true
       controller.abort()
     }
-  }, [platform, selectedPage?.id, period, since, until, timezone])
-
+  }, [tab, platform, selectedPage?.id, period, since, until, timezone])
   useEffect(() => {
-    if (platform === 'tk' || !selectedPage?.id) {
-      setOverviewInsights({})
-      setOverviewInsightsLoading(false)
-      return
-    }
-
-    let disposed = false
-    const controller = new AbortController()
-    setOverviewInsightsLoading(true)
-    fetch(buildInsightsBatchUrl(), { signal: controller.signal, cache: 'no-store' })
-      .then(async r => {
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}))
-          throw new Error(body.detail || 'Failed to load insights')
-        }
-        return r.json()
-      })
-      .then(payload => {
-        if (disposed) return
-        if (payload?.metrics && typeof payload.metrics === 'object') {
-          setOverviewInsights(payload.metrics)
-          return
-        }
-        if (payload?.metric) {
-          setOverviewInsights({ [payload.metric]: payload })
-          return
-        }
-        setOverviewInsights({})
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError' && !disposed) {
-          setOverviewInsights({})
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && !disposed) {
-          setOverviewInsightsLoading(false)
-        }
-      })
-
-    return () => {
-      disposed = true
-      controller.abort()
-    }
-  }, [platform, selectedPage?.id])
-
-  useEffect(() => {
-    if (platform !== 'ig' || !selectedPage?.id) {
+    if (tab !== 'analytics' || platform === 'tk' || !selectedPage?.id) {
       setTopWindowPosts([])
       setTopWindowPostsLoading(false)
-      return
-    }
-
-    let disposed = false
-    const controller = new AbortController()
-    setTopWindowPostsLoading(true)
-
-    fetch(buildTopPostsWindowUrl(), { signal: controller.signal, cache: 'no-store' })
-      .then(async r => {
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}))
-          throw new Error(body.detail || 'Failed to load window top posts')
-        }
-        return r.json()
-      })
-      .then(payload => {
-        if (!disposed) {
-          setTopWindowPosts(Array.isArray(payload?.posts) ? payload.posts : [])
-        }
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError' && !disposed) {
-          setTopWindowPosts([])
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && !disposed) {
-          setTopWindowPostsLoading(false)
-        }
-      })
-
-    return () => {
-      disposed = true
-      controller.abort()
-    }
-  }, [platform, selectedPage?.id, since, until])
-
-  useEffect(() => {
-    if (platform !== 'ig' || !selectedPage?.id) {
-      setAllPosts([])
-      setAllPostsLoading(false)
-      return
-    }
-
-    let disposed = false
-    const controller = new AbortController()
-    setAllPostsLoading(true)
-
-    fetch(buildAllPostsUrl(), { signal: controller.signal, cache: 'no-store' })
-      .then(async r => {
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}))
-          throw new Error(body.detail || 'Failed to load lifetime posts')
-        }
-        return r.json()
-      })
-      .then(payload => {
-        if (!disposed) {
-          setAllPosts(Array.isArray(payload?.posts) ? payload.posts : [])
-        }
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError' && !disposed) {
-          setAllPosts([])
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && !disposed) {
-          setAllPostsLoading(false)
-        }
-      })
-
-    return () => {
-      disposed = true
-      controller.abort()
-    }
-  }, [platform, selectedPage?.id])
-
-  useEffect(() => {
-    if (platform !== 'ig' || !selectedPage?.id) {
-      setAudienceDemographics(null)
-      setAudienceDemographicsLoading(false)
-      return
-    }
-
-    let disposed = false
-    const controller = new AbortController()
-    setAudienceDemographicsLoading(true)
-
-    fetch(buildAudienceDemographicsUrl(), { signal: controller.signal, cache: 'no-store' })
-      .then(async r => {
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}))
-          throw new Error(body.detail || 'Failed to load audience demographics')
-        }
-        return r.json()
-      })
-      .then(payload => {
-        if (!disposed) {
-          setAudienceDemographics(payload || null)
-        }
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError' && !disposed) {
-          setAudienceDemographics(null)
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && !disposed) {
-          setAudienceDemographicsLoading(false)
-        }
-      })
-
-    return () => {
-      disposed = true
-      controller.abort()
-    }
-  }, [platform, selectedPage?.id])
-
-  useEffect(() => {
-    if (platform !== 'ig' || !selectedPage?.id) {
       setEngagementBreakdown(null)
       setEngagementBreakdownLoading(false)
       return
@@ -1897,27 +1762,59 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
 
     let disposed = false
     const controller = new AbortController()
+    setTopWindowPostsLoading(true)
     setEngagementBreakdownLoading(true)
 
-    fetch(buildEngagementBreakdownUrl(), { signal: controller.signal, cache: 'no-store' })
+    fetch(buildAnalyticsTabUrl(), { signal: controller.signal, cache: 'no-store' })
       .then(async r => {
         if (!r.ok) {
           const body = await r.json().catch(() => ({}))
-          throw new Error(body.detail || 'Failed to load engagement breakdown')
+          throw new Error(body.detail || 'Failed to load analytics tab payload')
         }
         return r.json()
       })
       .then(payload => {
-        if (!disposed) {
+        if (disposed) return
+
+        const cards = payload?.cards || {}
+        const sections = payload?.sections || {}
+        const kpisWindow = cards?.kpis_window || {}
+        if (kpisWindow && typeof kpisWindow === 'object' && Object.keys(kpisWindow).length) {
+          setOverviewKpis(prev => ({ ...prev, ...kpisWindow }))
+          setReachMetric(kpisWindow?.reach || null)
+        }
+
+        const postsPayload = sections?.top_performance_posts_window || {}
+        setTopWindowPosts(Array.isArray(postsPayload?.posts) ? postsPayload.posts : [])
+
+        const breakdownPayload = sections?.engagement_breakdown_window || null
+        if (breakdownPayload) {
           const nextWindowDays = _inclusiveDaysBetween(since, until)
           setEngagementBreakdown({
-            ...payload,
-            window_days: Number(payload?.window_days || nextWindowDays),
+            ...breakdownPayload,
+            window_days: Number(breakdownPayload?.window_days || nextWindowDays),
+          })
+        } else {
+          setEngagementBreakdown({
+            breakdown: {
+              likes: 0,
+              comments: 0,
+              saves: 0,
+              shares: 0,
+              reposts: 0,
+              replies: 0,
+              other: 0,
+            },
+            total_interactions: 0,
+            window_days: _inclusiveDaysBetween(since, until),
+            since,
+            until,
           })
         }
       })
       .catch(err => {
         if (err.name !== 'AbortError' && !disposed) {
+          setTopWindowPosts([])
           setEngagementBreakdown({
             breakdown: {
               likes: 0,
@@ -1937,6 +1834,7 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
       })
       .finally(() => {
         if (!controller.signal.aborted && !disposed) {
+          setTopWindowPostsLoading(false)
           setEngagementBreakdownLoading(false)
         }
       })
@@ -1945,7 +1843,48 @@ export function FacebookAnalytics({ initialPlatform = 'fb', lockPlatform = false
       disposed = true
       controller.abort()
     }
-  }, [platform, selectedPage?.id, since, until])
+  }, [tab, platform, selectedPage?.id, period, since, until, timezone])
+
+  useEffect(() => {
+    if (tab !== 'posts' || platform !== 'ig' || !selectedPage?.id) {
+      setAllPosts([])
+      setAllPostsLoading(false)
+      return
+    }
+
+    let disposed = false
+    const controller = new AbortController()
+    setAllPostsLoading(true)
+
+    fetch(buildPostsTabUrl(), { signal: controller.signal, cache: 'no-store' })
+      .then(async r => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}))
+          throw new Error(body.detail || 'Failed to load posts tab payload')
+        }
+        return r.json()
+      })
+      .then(payload => {
+        if (disposed) return
+        const rows = payload?.sections?.all_posts_table?.rows
+        setAllPosts(Array.isArray(rows) ? rows : [])
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError' && !disposed) {
+          setAllPosts([])
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted && !disposed) {
+          setAllPostsLoading(false)
+        }
+      })
+
+    return () => {
+      disposed = true
+      controller.abort()
+    }
+  }, [tab, platform, selectedPage?.id, period, since, until, timezone])
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
