@@ -41,6 +41,7 @@ dependencies = [
     "fastmcp>=2.0",
     "langchain-mcp-adapters>=0.1",
     "langgraph-checkpoint-sqlite>=2.0",
+    "filelock>=3.12",
 ]
 
 [project.optional-dependencies]

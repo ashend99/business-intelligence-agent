@@ -22,13 +22,9 @@ _OVERVIEW_DEFAULTS = _OVERVIEW_CONFIG.get("defaults", {}) if isinstance(_OVERVIE
 _OVERVIEW_BEHAVIOR = _OVERVIEW_CONFIG.get("behavior", {}) if isinstance(_OVERVIEW_CONFIG.get("behavior", {}), dict) else {}
 _OVERVIEW_PLATFORM_RULES = _OVERVIEW_CONFIG.get("platform_rules", {}) if isinstance(_OVERVIEW_CONFIG.get("platform_rules", {}), dict) else {}
 
-CACHE_TTL_SECONDS = int(_OVERVIEW_BEHAVIOR.get("cache_ttl_seconds", 120) or 120)
-# Keep overview caching disabled for now so every tab load gets fresh data.
-ENABLE_OVERVIEW_CACHE = False
 ENABLE_COMPARISON_WINDOW = bool(_OVERVIEW_BEHAVIOR.get("comparison_window", True))
 CHART_DAYS = max(int(_OVERVIEW_DEFAULTS.get("chart_days", 30) or 30), 1)
 TOP_POSTS_LIMIT = max(int(_OVERVIEW_DEFAULTS.get("top_posts_limit", 10) or 10), 1)
-_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 logger = logging.getLogger(__name__)
 
 
@@ -117,43 +113,6 @@ def _format_previous_window_label(comparison_window: dict[str, str] | None, peri
     except (KeyError, ValueError):
         return f"vs previous {period}"
     return f"vs {since_date.strftime('%b %d')} - {until_date.strftime('%b %d')}"
-
-
-def _cache_key(
-    platform: str,
-    selected_account_id: str | None,
-    since: str | None,
-    until: str | None,
-    period: str,
-    timezone_name: str,
-) -> str:
-    return (
-        f"v1|{platform}|{selected_account_id or '-'}|{since or '-'}|{until or '-'}|"
-        f"{period}|{timezone_name}"
-    )
-
-
-def _read_cache(key: str) -> dict[str, Any] | None:
-    item = _CACHE.get(key)
-    if item is None:
-        return None
-    expires_at, payload = item
-    if time.time() >= expires_at:
-        _CACHE.pop(key, None)
-        return None
-
-    cached = dict(payload)
-    meta = dict(cached.get("meta", {}))
-    meta["cache"] = {
-        "hit": True,
-        "ttl_seconds": CACHE_TTL_SECONDS,
-    }
-    cached["meta"] = meta
-    return cached
-
-
-def _write_cache(key: str, payload: dict[str, Any]) -> None:
-    _CACHE[key] = (time.time() + CACHE_TTL_SECONDS, payload)
 
 
 def _derive_metric(
@@ -419,12 +378,6 @@ async def build_social_overview(
     started_at = time.perf_counter()
     partial_errors: list[str] = []
 
-    cache_key = _cache_key(platform, selected_account_id, since, until, period, timezone_name)
-    if ENABLE_OVERVIEW_CACHE and not force_refresh:
-        cached = _read_cache(cache_key)
-        if cached is not None:
-            return cached
-
     parsed_since = _parse_date_or_none(since)
     parsed_until = _parse_date_or_none(until, is_until=True)
 
@@ -433,7 +386,7 @@ async def build_social_overview(
     if platform == "fb":
         pages = await get_pages()
         accounts = [_to_account_item(page, platform) for page in pages]
-        _log_step_duration("load_accounts", accounts_started_at, platform=platform, account_count=len(accounts))
+        # _log_step_duration("load_accounts", accounts_started_at, platform=platform, account_count=len(accounts))
         selected = next((a for a in accounts if a["id"] == selected_account_id), None)
         if selected is None and accounts:
             selected = accounts[0]
@@ -464,7 +417,7 @@ async def build_social_overview(
                 _fetch_posts_placeholder(),
                 return_exceptions=True,
             )
-            _log_step_duration("fetch_metrics_parallel", metrics_started_at, platform=platform, selected_account_id=selected["id"])
+            # _log_step_duration("fetch_metrics_parallel", metrics_started_at, platform=platform, selected_account_id=selected["id"])
             if isinstance(reach_result, Exception):
                 partial_errors.append(f"reach: {reach_result}")
             else:
@@ -482,7 +435,7 @@ async def build_social_overview(
                             until=_parse_date_or_none(prev_until, is_until=True),
                             period=period,
                         )
-                        _log_step_duration("fetch_previous_window", previous_started_at, platform=platform, selected_account_id=selected["id"])
+                        # _log_step_duration("fetch_previous_window", previous_started_at, platform=platform, selected_account_id=selected["id"])
                         current_total = int(reach.get("total_count", reach.get("current_total", 0)) or 0)
                         previous_total = int(previous_reach.get("total_count", previous_reach.get("current_total", 0)) or 0)
                         reach["total_count"] = current_total
@@ -527,7 +480,7 @@ async def build_social_overview(
             }
         kpis = _filter_kpis_for_platform(platform, kpis)
         charts = _build_charts(kpis, chart_reach)
-        _log_step_duration("build_kpis_and_charts", merge_started_at, platform=platform)
+        # _log_step_duration("build_kpis_and_charts", merge_started_at, platform=platform)
 
         payload_sections: dict[str, Any] = {
             "summary": {
@@ -556,21 +509,15 @@ async def build_social_overview(
                     "timezone": timezone_name,
                 },
                 "duration_ms": int((time.perf_counter() - started_at) * 1000),
-                "cache": {
-                    "hit": False,
-                    "ttl_seconds": CACHE_TTL_SECONDS,
-                },
             },
         }
-        _log_step_duration("build_payload", started_at, platform=platform, selected_account_id=(selected or {}).get("id"))
-        if ENABLE_OVERVIEW_CACHE:
-            _write_cache(cache_key, payload)
+        # _log_step_duration("build_payload", started_at, platform=platform, selected_account_id=(selected or {}).get("id"))
         return payload
 
     if platform == "ig":
         ig_accounts = await get_accounts()
         accounts = [_to_account_item(account, platform) for account in ig_accounts]
-        _log_step_duration("load_accounts", accounts_started_at, platform=platform, account_count=len(accounts))
+        # _log_step_duration("load_accounts", accounts_started_at, platform=platform, account_count=len(accounts))
         selected = next((a for a in accounts if a["id"] == selected_account_id), None)
         if selected is None and accounts:
             selected = accounts[0]
@@ -622,7 +569,7 @@ async def build_social_overview(
                 ),
                 return_exceptions=True,
             )
-            _log_step_duration("fetch_metrics_parallel", metrics_started_at, platform=platform, selected_account_id=selected["id"])
+            # _log_step_duration("fetch_metrics_parallel", metrics_started_at, platform=platform, selected_account_id=selected["id"])
             if isinstance(current_metrics_result, Exception):
                 partial_errors.append(f"reach_views: {current_metrics_result}")
             else:
@@ -645,7 +592,7 @@ async def build_social_overview(
                             until=_parse_date_or_none(prev_until, is_until=True),
                             period=period,
                         )
-                        _log_step_duration("fetch_previous_window", previous_started_at, platform=platform, selected_account_id=selected["id"])
+                        # _log_step_duration("fetch_previous_window", previous_started_at, platform=platform, selected_account_id=selected["id"])
                         previous_reach = previous_metrics.get("reach")
                         previous_views = previous_metrics.get("views")
                         previous_engagement_metric = previous_metrics.get("total_interactions")
@@ -743,7 +690,7 @@ async def build_social_overview(
             }
         kpis = _filter_kpis_for_platform(platform, kpis)
         charts = _build_charts(kpis, chart_reach_metric)
-        _log_step_duration("build_kpis_and_charts", merge_started_at, platform=platform)
+        # _log_step_duration("build_kpis_and_charts", merge_started_at, platform=platform)
 
         payload_sections: dict[str, Any] = {
             "summary": {
@@ -776,15 +723,9 @@ async def build_social_overview(
                     "timezone": timezone_name,
                 },
                 "duration_ms": int((time.perf_counter() - started_at) * 1000),
-                "cache": {
-                    "hit": False,
-                    "ttl_seconds": CACHE_TTL_SECONDS,
-                },
             },
         }
-        _log_step_duration("build_payload", started_at, platform=platform, selected_account_id=(selected or {}).get("id"))
-        if ENABLE_OVERVIEW_CACHE:
-            _write_cache(cache_key, payload)
+        # _log_step_duration("build_payload", started_at, platform=platform, selected_account_id=(selected or {}).get("id"))
         return payload
 
     raise ValueError(f"Unsupported platform: {platform}")

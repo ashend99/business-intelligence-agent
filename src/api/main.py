@@ -48,8 +48,17 @@ from ingestion.vectordb import get_vector_db  # noqa: E402
 from mcp_server.facebook.client import init_client as init_facebook_client, close_client as close_facebook_client  # noqa: E402
 from mcp_server.facebook.analytics import get_pages, get_pages_field, get_reach  # noqa: E402
 from mcp_server.instagram.client import init_client as init_instagram_client, close_client as close_instagram_client  # noqa: E402
-from mcp_server.instagram.analytics import get_accounts, get_top_posts_by_account_id, get_all_posts_by_account_id, get_posts_metrics_by_account_id, get_engagement_breakdown_by_account_id, get_overview_metrics_by_account_id, get_audience_demographics_by_account_id  # noqa: E402
+from mcp_server.instagram.analytics import get_accounts, get_all_posts_by_account_id, get_overview_metrics_by_account_id, get_audience_demographics_by_account_id  # noqa: E402
 from api.social_overview import build_social_overview  # noqa: E402
+from api.social_builders import (  # noqa: E402
+    build_analytics_payload,
+    build_posts_payload,
+    build_engagement_breakdown,
+    build_top_posts,
+    build_posts_metrics,
+)
+from poller import cache_store  # noqa: E402
+from poller.poller import start_poller  # noqa: E402
 from config.settings import settings  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -90,6 +99,7 @@ async def lifespan(app: FastAPI):
     if settings.facebook_access_token:
         init_facebook_client(settings.facebook_access_token)
         init_instagram_client(settings.facebook_access_token)
+    asyncio.create_task(start_poller())
     yield
     await close_facebook_client()
     await close_instagram_client()
@@ -218,6 +228,16 @@ def _parse_social_date_or_none(value: str | None, *, is_until: bool = False) -> 
     return parsed
 
 
+def _inject_cache_meta(payload: dict, cached_at: str) -> dict:
+    """Return a shallow copy of payload with cached_at and cache_hit injected into meta."""
+    result = dict(payload)
+    meta = dict(result.get("meta", {}))
+    meta["cached_at"] = cached_at
+    meta["cache_hit"] = True
+    result["meta"] = meta
+    return result
+
+
 class ChatRequest(BaseModel):
     business_key: str
     thread_id: str
@@ -272,6 +292,13 @@ async def social_overview(
             },
         }
 
+    cache_key = cache_store.overview_key(normalized_platform, account_id or "-")
+    if not refresh:
+        hit = cache_store.read(cache_key)
+        print(f"Cache read for key={cache_key} hit={'yes' if hit else 'no'}")
+        if hit is not None:
+            return _inject_cache_meta(hit.payload, hit.cached_at)
+
     try:
         print(
             f"social_overview request start platform={normalized_platform} account_id={account_id} since={since} until={until} period={period} timezone={timezone} refresh={refresh}"
@@ -288,7 +315,7 @@ async def social_overview(
         print(
             f"social_overview request complete platform={normalized_platform} account_id={account_id} duration_ms={int((datetime.now().timestamp() - request_started_at) * 1000)}"
         )
-        print(f"social_overview payload: {payload}")
+        cache_store.write(cache_key, payload)
         return payload
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -337,97 +364,33 @@ async def social_analytics_tab(
             "partial_errors": [],
         }
 
-    partial_errors: list[dict[str, str]] = []
+    cache_key = cache_store.analytics_key(
+        normalized_platform, account_id, since, until, period, timezone,
+        top_posts_limit, compare_previous,
+    )
+    if not refresh:
+        hit = cache_store.read(cache_key)
+        if hit is not None:
+            return _inject_cache_meta(hit.payload, hit.cached_at)
 
     try:
-        overview_payload = await build_social_overview(
+        payload = await build_analytics_payload(
             platform=normalized_platform,
-            selected_account_id=account_id,
+            account_id=account_id,
             since=since,
             until=until,
             period=period,
             timezone_name=timezone,
-            force_refresh=refresh,
+            top_posts_limit=top_posts_limit,
+            compare_previous=compare_previous,
+            include_sections=include_sections,
+            include_kpis=include_kpis,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    overview_kpis = overview_payload.get("kpis", {}) if isinstance(overview_payload.get("kpis", {}), dict) else {}
-    cards = {
-        "kpis_window": {
-            key: value for key, value in overview_kpis.items()
-            if (not include_kpis or key in include_kpis)
-        }
-    }
-
-    sections: dict = {}
-    link_to_window = bool(since and until and compare_previous)
-
-    if not include_sections or "engagement_breakdown_window" in include_sections:
-        try:
-            sections["engagement_breakdown_window"] = await social_engagement_breakdown(
-                platform=normalized_platform,
-                account_id=account_id,
-                since=since,
-                until=until,
-                link_to_window=link_to_window,
-            )
-        except Exception as exc:
-            partial_errors.append({"part": "engagement_breakdown_window", "message": str(exc)})
-
-    if not include_sections or "top_performance_posts_window" in include_sections:
-        try:
-            sections["top_performance_posts_window"] = await social_top_posts(
-                platform=normalized_platform,
-                account_id=account_id,
-                since=since,
-                until=until,
-                limit=top_posts_limit,
-                link_to_window=link_to_window,
-            )
-        except Exception as exc:
-            partial_errors.append({"part": "top_performance_posts_window", "message": str(exc)})
-
-    if not include_sections or "engagement_metric_details" in include_sections:
-        breakdown_payload = sections.get("engagement_breakdown_window", {})
-        current_breakdown = breakdown_payload.get("breakdown", {}) if isinstance(breakdown_payload, dict) else {}
-        previous_breakdown = breakdown_payload.get("previous_breakdown", {}) if isinstance(breakdown_payload, dict) else {}
-        metric_keys = ["likes", "comments", "shares", "reposts", "replies", "saves"]
-        rows = []
-        for metric_key in metric_keys:
-            current_value = int(current_breakdown.get(metric_key, 0) or 0)
-            previous_value = int(previous_breakdown.get(metric_key, 0) or 0)
-            diff = current_value - previous_value
-            diff_pct = (diff / previous_value * 100.0) if previous_value > 0 else (100.0 if current_value > 0 else 0.0)
-            rows.append(
-                {
-                    "metric": metric_key,
-                    "current": current_value,
-                    "previous": previous_value,
-                    "change": diff,
-                    "change_pct": round(diff_pct, 2),
-                }
-            )
-        sections["engagement_metric_details"] = {
-            "since": breakdown_payload.get("since") if isinstance(breakdown_payload, dict) else since,
-            "until": breakdown_payload.get("until") if isinstance(breakdown_payload, dict) else until,
-            "rows": rows,
-        }
-
-    return {
-        "tab": "analytics",
-        "meta": {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "since": since,
-            "until": until,
-            "timezone": timezone,
-            "generated_at": f"{datetime.utcnow().isoformat()}Z",
-        },
-        "cards": cards,
-        "sections": sections,
-        "partial_errors": partial_errors,
-    }
+    cache_store.write(cache_key, payload)
+    return payload
 
 
 @app.get(_SOCIAL_POSTS_ROUTE)
@@ -442,6 +405,7 @@ async def social_posts_tab(
     sort_by: str = Query(default=_DEFAULT_POSTS_SORT_BY),
     limit: int = Query(default=_DEFAULT_POSTS_LIMIT, ge=1, le=200),
     page: int = Query(default=1, ge=1),
+    refresh: bool = Query(default=False),
 ) -> dict:
     """Return one aggregated payload for the Posts tab."""
     normalized_platform = platform.lower()
@@ -476,95 +440,30 @@ async def social_posts_tab(
     if normalized_platform == "ig" and not account_id:
         raise HTTPException(status_code=400, detail="account_id is required for posts tab.")
 
-    partial_errors: list[dict[str, str]] = []
-    posts_payload: dict = {
-        "platform": normalized_platform,
-        "account_id": account_id,
-        "scope": scope,
-        "posts": [],
-    }
+    cache_key = cache_store.posts_key(normalized_platform, account_id, scope)
+    if not refresh:
+        hit = cache_store.read(cache_key)
+        if hit is not None:
+            return _inject_cache_meta(hit.payload, hit.cached_at)
 
     try:
-        if scope == "lifetime":
-            posts_payload = await social_posts_metrics(platform=normalized_platform, account_id=account_id)
-        else:
-            posts_payload = await social_top_posts(
-                platform=normalized_platform,
-                account_id=account_id,
-                since=since,
-                until=until,
-                limit=limit,
-                link_to_window=bool(since and until),
-            )
+        payload = await build_posts_payload(
+            platform=normalized_platform,
+            account_id=account_id,
+            scope=scope,
+            since=since,
+            until=until,
+            sort_by=sort_by,
+            limit=limit,
+            page=page,
+            include_sections=include_sections,
+            include_cards=include_cards,
+        )
     except Exception as exc:
-        partial_errors.append({"part": "all_posts_table", "message": str(exc)})
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    posts = posts_payload.get("posts", []) if isinstance(posts_payload.get("posts", []), list) else []
-
-    sortable_fields = {
-        "engagement_total": lambda row: float(row.get("engagement_total", 0) or 0),
-        "reach": lambda row: float(row.get("reach", 0) or 0),
-        "created_at": lambda row: row.get("created_at", "") or "",
-    }
-    sorter = sortable_fields.get(sort_by, sortable_fields["engagement_total"])
-    sorted_posts = sorted(posts, key=sorter, reverse=True)
-
-    start = (page - 1) * limit
-    end = start + limit
-    paged_posts = sorted_posts[start:end]
-
-    total_posts = len(posts)
-    total_engagement = sum(float(row.get("engagement_total", 0) or 0) for row in posts)
-    avg_engagement_rate = (
-        sum(float(row.get("engagement_rate", 0) or 0) for row in posts) / total_posts
-        if total_posts > 0
-        else 0.0
-    )
-
-    cards_all = {
-        "total_posts": total_posts,
-        "total_engagement": int(total_engagement),
-        "avg_engagement_rate": round(avg_engagement_rate, 4),
-    }
-    cards = {k: v for k, v in cards_all.items() if (not include_cards or k in include_cards)}
-
-    type_counts: dict[str, int] = {}
-    for row in posts:
-        media_type = str(row.get("type", "other") or "other").strip().lower()
-        type_counts[media_type] = type_counts.get(media_type, 0) + 1
-
-    sections: dict = {}
-    if not include_sections or "all_posts_table" in include_sections:
-        sections["all_posts_table"] = {
-            "total": total_posts,
-            "rows": paged_posts,
-        }
-    if not include_sections or "posts_type_breakdown" in include_sections:
-        sections["posts_type_breakdown"] = type_counts
-    if not include_sections or "pagination" in include_sections:
-        sections["pagination"] = {
-            "page": page,
-            "limit": limit,
-            "total": total_posts,
-            "has_next": end < total_posts,
-        }
-
-    return {
-        "tab": "posts",
-        "meta": {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "since": since,
-            "until": until,
-            "timezone": timezone,
-            "period": period,
-            "scope": scope,
-            "generated_at": f"{datetime.utcnow().isoformat()}Z",
-        },
-        "cards": cards,
-        "sections": sections,
-        "partial_errors": partial_errors,
-    }
+    cache_store.write(cache_key, payload)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -636,13 +535,20 @@ async def facebook_reach(page_name: str = Query(..., min_length=1)) -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/social/instagram/accounts")
-async def instagram_accounts() -> dict:
+async def instagram_accounts(refresh: bool = Query(default=False)) -> dict:
     """Return Instagram business accounts available to the configured token."""
     if not settings.facebook_access_token:
         return {"accounts": []}
+
+    cache_key = cache_store.accounts_key("ig")
+    if not refresh:
+        hit = cache_store.read(cache_key)
+        if hit is not None:
+            return _inject_cache_meta(hit.payload, hit.cached_at)
+
     try:
         accounts = await get_accounts()
-        return {
+        payload = {
             "accounts": [
                 {
                     "id": account.id,
@@ -658,6 +564,8 @@ async def instagram_accounts() -> dict:
                 for account in accounts
             ]
         }
+        cache_store.write(cache_key, payload)
+        return payload
     except AttributeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -679,47 +587,18 @@ async def social_top_posts(
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 
     if not settings.facebook_access_token:
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "link_to_window": bool(link_to_window),
-            "posts": [],
-        }
-
-    if normalized_platform != "ig":
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "link_to_window": bool(link_to_window),
-            "posts": [],
-        }
-
-    if not account_id:
-        raise HTTPException(status_code=400, detail="account_id is required for Instagram top posts.")
+        return {"platform": normalized_platform, "account_id": account_id, "link_to_window": bool(link_to_window), "posts": []}
 
     if link_to_window:
         _validate_instagram_window(since, until)
 
-    parsed_since = _parse_social_date_or_none(since) if link_to_window else None
-    parsed_until = _parse_social_date_or_none(until, is_until=True) if link_to_window else None
-
     try:
-        posts = await get_top_posts_by_account_id(
-            account_id,
-            since=parsed_since,
-            until=parsed_until,
-            limit=limit,
+        return await build_top_posts(
+            platform=normalized_platform, account_id=account_id,
+            since=since, until=until, limit=limit, link_to_window=link_to_window,
         )
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "link_to_window": bool(link_to_window),
-            "since": since if link_to_window else None,
-            "until": until if link_to_window else None,
-            "posts": posts,
-        }
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -778,36 +657,13 @@ async def social_posts_metrics(
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 
     if not settings.facebook_access_token:
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "scope": "lifetime",
-            "posts": [],
-        }
-
-    if normalized_platform != "ig":
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "scope": "lifetime",
-            "posts": [],
-        }
-
-    if not account_id:
-        raise HTTPException(status_code=400, detail="account_id is required for posts metrics.")
+        return {"platform": normalized_platform, "account_id": account_id, "scope": "lifetime", "posts": []}
 
     try:
-        posts = await get_posts_metrics_by_account_id(account_id)
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "scope": "lifetime",
-            "posts": posts,
-        }
+        return await build_posts_metrics(platform=normalized_platform, account_id=account_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        print(f"Error in social_posts_metrics: {exc}")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -1043,97 +899,18 @@ async def social_engagement_breakdown(
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 
     if not settings.facebook_access_token:
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "link_to_window": bool(link_to_window),
-            "window_days": 30,
-            "breakdown": {
-                "likes": 0,
-                "comments": 0,
-                "saves": 0,
-                "shares": 0,
-                "reposts": 0,
-                "replies": 0,
-                "other": 0,
-            },
-            "total_interactions": 0,
-        }
-
-    if normalized_platform != "ig":
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "link_to_window": bool(link_to_window),
-            "window_days": 30,
-            "breakdown": {
-                "likes": 0,
-                "comments": 0,
-                "saves": 0,
-                "shares": 0,
-                "reposts": 0,
-                "replies": 0,
-                "other": 0,
-            },
-            "total_interactions": 0,
-        }
-
-    if not account_id:
-        raise HTTPException(status_code=400, detail="account_id is required for Instagram engagement breakdown.")
-
-    default_since = None
-    default_until = None
+        return {"platform": normalized_platform, "account_id": account_id, "link_to_window": bool(link_to_window), "window_days": 30, "breakdown": {"likes": 0, "comments": 0, "saves": 0, "shares": 0, "reposts": 0, "replies": 0, "other": 0}, "total_interactions": 0}
 
     if link_to_window:
         _validate_instagram_window(since, until)
-        since_date = datetime.fromisoformat(since).date() if since else None
-        until_date = datetime.fromisoformat(until).date() if until else None
-        window_days = ((until_date - since_date).days + 1) if since_date and until_date else 30
-        parsed_since = _parse_social_date_or_none(since)
-        parsed_until = _parse_social_date_or_none(until, is_until=True)
-    else:
-        today = datetime.now(timezone.utc).date()
-        default_since = today - timedelta(days=29)
-        default_until = today
-        parsed_since = datetime.combine(default_since, datetime.min.time(), tzinfo=timezone.utc)
-        parsed_until = datetime.combine(default_until, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
-        window_days = 30
-
-    # Compute previous window (equal length immediately before current)
-    prev_since = parsed_since - timedelta(days=int(window_days))
-    prev_until = parsed_since
-    prev_window_ok = (parsed_until - prev_since).days <= _INSTAGRAM_MAX_LOOKBACK_DAYS
-
-    _empty_breakdown = {"likes": 0, "comments": 0, "saves": 0, "shares": 0, "reposts": 0, "replies": 0, "other": 0}
-
-    async def _empty_prev() -> dict:
-        return {"breakdown": _empty_breakdown, "total_interactions": 0}
 
     try:
-        current_payload, prev_payload = await asyncio.gather(
-            get_engagement_breakdown_by_account_id(account_id, since=parsed_since, until=parsed_until),
-            get_engagement_breakdown_by_account_id(account_id, since=prev_since, until=prev_until)
-            if prev_window_ok else _empty_prev(),
-            return_exceptions=True,
+        return await build_engagement_breakdown(
+            platform=normalized_platform, account_id=account_id,
+            since=since, until=until, link_to_window=link_to_window,
         )
-        if isinstance(current_payload, Exception):
-            raise current_payload
-        prev_breakdown = (prev_payload.get("breakdown") or _empty_breakdown) if isinstance(prev_payload, dict) else _empty_breakdown
-        prev_total = (prev_payload.get("total_interactions") or 0) if isinstance(prev_payload, dict) else 0
-
-        return {
-            "platform": normalized_platform,
-            "account_id": account_id,
-            "link_to_window": bool(link_to_window),
-            "window_days": int(window_days),
-            "since": since if link_to_window else default_since.isoformat(),
-            "until": until if link_to_window else default_until.isoformat(),
-            **current_payload,
-            "previous_breakdown": prev_breakdown,
-            "previous_total_interactions": int(prev_total),
-        }
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

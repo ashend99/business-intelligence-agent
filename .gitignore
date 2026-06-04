@@ -51,3 +51,8 @@ node_modules/
 nexus/
 
 api_tokens.txt
+
+# Social metrics file cache — runtime data, rebuilt on server start
+cache/*.json
+cache/*.lock
+cache/*.tmp

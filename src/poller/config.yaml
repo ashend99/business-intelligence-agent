@@ -1,0 +1,21 @@
+poller:
+  interval_minutes: 15
+  startup_warm_up: true       # run one warm-up poll immediately on server start
+
+cache:
+  file_path: "cache/social_cache.json"
+  ttl_seconds: 900            # 15 min — matches poll interval
+  lock_timeout_seconds: 10    # max seconds to wait to acquire the write lock
+  read_retry_interval_ms: 100 # sleep between read-lock retries
+  read_max_retries: 50        # 50 × 100 ms = 5 sec max wait on a locked file
+
+platforms:
+  - ig
+  - fb
+
+# Default window sizes used by the poller for pre-warming.
+# Route handlers map (since=null, until=null) to these semantic cache keys.
+defaults:
+  analytics_window_days: 7    # pre-warm analytics with last N days
+  overview_window_days: 30    # pre-warm overview with last N days
+  top_posts_limit: 10

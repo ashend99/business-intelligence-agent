@@ -381,14 +381,14 @@ async def _get_insights_by_metric_names(
 ) -> dict[str, dict]:
     if not metric_names:
         raise ValueError("Provide at least one metric name.")
-    print(f"Fetching insights for account ID {account_id} with metrics={metric_names}, since={since}, until={until}, period={period}, metric_type={metric_type}")
+    # print(f"Fetching insights for account ID {account_id} with metrics={metric_names}, since={since}, until={until}, period={period}, metric_type={metric_type}")
     config = _load_config()
     route_template = config.get("routing", {}).get("insights_path")
     metric_cfg = config.get("metrics", {}).get(metric_names[0], {})
     resolved_period = _resolve_period_for_metrics(metric_names, period, config)
     window_days = int(metric_cfg.get("window_days", 28))
     since = _clamp_since(since, until, metric_names, config)
-    print(f"Resolved period: {resolved_period}, clamped since: {since}, window_days: {window_days}")
+    # print(f"Resolved period: {resolved_period}, clamped since: {since}, window_days: {window_days}")
 
     if not route_template:
         raise ValueError("Missing routing.insights_path in src/mcp_server/instagram/config.yaml")
@@ -398,7 +398,7 @@ async def _get_insights_by_metric_names(
     account = await get_account_by_id(account_id)
     if account is None:
         raise ValueError(f"Instagram account not found: {account_id}")
-    print(f"Found Instagram account: {account.name} (ID: {account.id})")
+    # print(f"Found Instagram account: {account.name} (ID: {account.id})")
 
     resolved_since, resolved_until = _resolve_bounds(since, until, window_days)
     insights_path = route_template.format(ig_user_id=account.id)
@@ -410,7 +410,7 @@ async def _get_insights_by_metric_names(
         "since": int(resolved_since.timestamp()),
         "until": int(resolved_until.timestamp()),
     }
-    print(f"Requesting insights with params: {request_params}")
+    # print(f"Requesting insights with params: {request_params}")
     if metric_type is not None:
         request_params["metric_type"] = metric_type
 
@@ -419,7 +419,7 @@ async def _get_insights_by_metric_names(
         payload = await client.get(insights_path, **request_params)
     except Exception as exc:
         logger.warning("Error fetching insights: %s", exc)
-        print(f"Error fetching insights: {exc}")
+        # print(f"Error fetching insights: {exc}")
     # print(
     #     "instagram_insights_fetch duration_ms=%s account_id=%s metrics=%s period=%s since=%s until=%s",
     #     int((time.perf_counter() - request_started_at) * 1000),
@@ -560,7 +560,7 @@ async def get_reach_timeseries_by_account_id(
     insights_path = chart_route_template.format(ig_user_id=account.id)
     client = get_client()
     request_started_at = time.perf_counter()
-    print(f"Fetching reach timeseries for account ID {account_id} with since={since}, until={until}, period={period}")
+    # print(f"Fetching reach timeseries for account ID {account_id} with since={since}, until={until}, period={period}")
 
     base_params: dict[str, Any] = {
         "metric": "reach",
@@ -569,14 +569,14 @@ async def get_reach_timeseries_by_account_id(
         "until": int(resolved_until.timestamp()),
     }
     initial_payload = await client.get(insights_path, **base_params)
-    print(
-        "instagram_reach_chart_fetch duration_ms=%s account_id=%s period=%s since=%s until=%s",
-        int((time.perf_counter() - request_started_at) * 1000),
-        account_id,
-        resolved_period,
-        resolved_since.date().isoformat(),
-        resolved_until.date().isoformat(),
-    )
+    # print(
+    #     "instagram_reach_chart_fetch duration_ms=%s account_id=%s period=%s since=%s until=%s",
+    #     int((time.perf_counter() - request_started_at) * 1000),
+    #     account_id,
+    #     resolved_period,
+    #     resolved_since.date().isoformat(),
+    #     resolved_until.date().isoformat(),
+    # )
     initial_result = {
         "reach": _build_metric_summary(initial_payload, "reach", account, resolved_since, resolved_until, resolved_period)
     }
@@ -610,7 +610,7 @@ async def get_reach_by_account_id(
     period: str | None = None,
 ) -> dict:
     """Return summarized reach analytics for an Instagram business account."""
-    print(f"Fetching reach insights for account ID {account_id} with since={since}, until={until}, period={period}")
+    # print(f"Fetching reach insights for account ID {account_id} with since={since}, until={until}, period={period}")
     return (await _get_insights_by_metric_names(account_id, ("reach",), since=since, until=until, period=period))["reach"]
 
 
@@ -621,7 +621,7 @@ async def get_views_by_account_id(
     period: str | None = None,
 ) -> dict:
     """Return summarized views analytics for an Instagram business account."""
-    print(f"Fetching views insights for account ID {account_id} with since={since}, until={until}, period={period}")
+    # print(f"Fetching views insights for account ID {account_id} with since={since}, until={until}, period={period}")
     return (await _get_insights_by_metric_names(account_id, ("views",), since=since, until=until, period=period))["views"]
 
 
@@ -656,17 +656,17 @@ async def get_engagement_breakdown_by_account_id(
     shares = _non_negative_int((summaries.get("shares") or {}).get("total_count", 0))
     reposts = _non_negative_int((summaries.get("reposts") or {}).get("total_count", 0))
     replies = _non_negative_int((summaries.get("replies") or {}).get("total_count", 0))
-    print(
-        f"Engagement breakdown for account ID {account_id} with since={since}, until={until}: "
-        f"total_interactions={total_interactions}, likes={likes}, comments={comments}, saves={saves}, "
-        f"shares={shares}, reposts={reposts}, replies={replies}"
-    )
+    # print(
+    #     f"Engagement breakdown for account ID {account_id} with since={since}, until={until}: "
+    #     f"total_interactions={total_interactions}, likes={likes}, comments={comments}, saves={saves}, "
+    #     f"shares={shares}, reposts={reposts}, replies={replies}"
+    # )
 
     known_sum = likes + comments + saves + shares + reposts + replies
     other = max(total_interactions - known_sum, 0)
-    print(
-        f"Calculated engagement breakdown for account ID {account_id}: known_sum={known_sum}, other={other}"
-    )
+    # print(
+    #     f"Calculated engagement breakdown for account ID {account_id}: known_sum={known_sum}, other={other}"
+    # )
 
     breakdown = {
         "likes": likes,

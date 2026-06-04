@@ -456,7 +456,16 @@ function TimeRangeWidget({
   )
 }
 
-function KPICard({ label, value, delta, color, spark, comparisonLabel, description, changeValue, trend = 'flat' }) {
+function KPICard({ label, value, delta, color, spark, comparisonLabel, description, changeValue, trend = 'flat', loading = false }) {
+  if (loading) {
+    return (
+      <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minWidth: 0, opacity: 0.6 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>{label}</span>
+        <div style={{ marginTop: 8, fontSize: 24, fontWeight: 700, color: 'var(--text-3)', letterSpacing: '-0.02em' }}>···</div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>loading…</div>
+      </div>
+    )
+  }
   const isNeg = trend === 'down' || delta.startsWith('−') || delta.startsWith('-')
   const isFlat = trend === 'flat' && !isNeg
   const changeText = `${isNeg ? '−' : '+'}${changeValue || '0'}`
@@ -522,13 +531,13 @@ function ReachCard({ metric, loading }) {
   )
 }
 
-function SnapshotMetricCard({ label, value, unavailable = false }) {
+function SnapshotMetricCard({ label, value, unavailable = false, loading = false }) {
   const display = unavailable ? '—' : (value ?? '0')
   return (
-    <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+    <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minWidth: 0, opacity: loading ? 0.6 : 1 }}>
       <div style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>{label}</div>
-      <div style={{ marginTop: 8, fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', color: unavailable ? 'var(--text-3)' : 'var(--text)' }}>
-        {display}
+      <div style={{ marginTop: 8, fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', color: loading ? 'var(--text-3)' : (unavailable ? 'var(--text-3)' : 'var(--text)') }}>
+        {loading ? '···' : display}
       </div>
     </div>
   )
@@ -1241,7 +1250,7 @@ function AnalyticsContent({
             {platform === 'ig' && (
               <KPICard label="Engaged Accounts" value={engagedAccountsMetric?.value || '0'} delta={engagedAccountsMetric?.delta || '0.0%'} color="#0EA5A6" comparisonLabel={engagedAccountsMetric?.comparison_label || 'vs previous period'} description={engagedAccountsMetric?.description || 'Unique accounts engaged for the selected window.'} changeValue={engagedAccountsMetric?.change_value || '0'} trend={engagedAccountsMetric?.trend || 'flat'} spark={engagedAccountsMetric?.spark?.length ? engagedAccountsMetric.spark : [0, 0, 0, 0, 0, 0, 0]} />
             )}
-            <KPICard label="Eng. Rate" value={engagementRateMetric?.value || '12.24%'} delta={engagementRateMetric?.delta || '8.7%'} color="#FF8A4C" comparisonLabel={engagementRateMetric?.comparison_label || 'vs previous period'} description={engagementRateMetric?.description || 'Engagement Rate = total interactions / reach for the selected window, compared with the previous window.'} changeValue={engagementRateMetric?.change_value || '0'} trend={engagementRateMetric?.trend || 'flat'} spark={engagementRateMetric?.spark?.length ? engagementRateMetric.spark : [70,72,74,76,78,80,82,84,82,86,88,90,92,96]} />
+            <KPICard label="Eng. Rate" value={engagementRateMetric?.value || '0.00%'} delta={engagementRateMetric?.delta || '8.7%'} color="#FF8A4C" comparisonLabel={engagementRateMetric?.comparison_label || 'vs previous period'} description={engagementRateMetric?.description || 'Engagement Rate = total interactions / reach for the selected window, compared with the previous window.'} changeValue={engagementRateMetric?.change_value || '0'} trend={engagementRateMetric?.trend || 'flat'} spark={engagementRateMetric?.spark?.length ? engagementRateMetric.spark : [70,72,74,76,78,80,82,84,82,86,88,90,92,96]} />
             {platform === 'ig' && (
               <KPICard label="Follows & Unfollows" value={followsAndUnfollowsMetric?.value || '0'} delta={followsAndUnfollowsMetric?.delta || '0.0%'} color="#4A8CFF" comparisonLabel={followsAndUnfollowsMetric?.comparison_label || 'vs previous period'} description={followsAndUnfollowsMetric?.description || 'Follows and unfollows for the selected window.'} changeValue={followsAndUnfollowsMetric?.change_value || '0'} trend={followsAndUnfollowsMetric?.trend || 'flat'} spark={followsAndUnfollowsMetric?.spark?.length ? followsAndUnfollowsMetric.spark : [0, 0, 0, 0, 0, 0, 0]} />
             )}
@@ -1252,6 +1261,9 @@ function AnalyticsContent({
 
           <div style={{ display: 'grid', gridTemplateColumns: '420px minmax(0, 1fr)', gap: 14 }}>
             <Section title="Engagement Breakdown" subtitle={engagementBreakdownData.subtitle}>
+              {engagementBreakdownLoading ? (
+                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading engagement breakdown...</div>
+              ) : (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
                 <DonutMulti
                   size={160}
@@ -1273,6 +1285,7 @@ function AnalyticsContent({
                   </div>
                 </div>
               </div>
+              )}
             </Section>
 
             <Section title="Top Performance Posts" subtitle={currentWindowLabel === '—' ? 'time-window' : currentWindowLabel}>
@@ -1715,7 +1728,7 @@ export function Social({ initialPlatform = 'fb', lockPlatform = false }) {
     const controller = new AbortController()
     setReachLoading(true)
 
-    fetch(buildOverviewUrl({ account_id: selectedPage.id, refresh: 'true' }), { signal: controller.signal, cache: 'no-store' })
+    fetch(buildOverviewUrl({ account_id: selectedPage.id }), { signal: controller.signal, cache: 'no-store' })
       .then(async r => {
         if (!r.ok) {
           const body = await r.json().catch(() => ({}))
@@ -1957,26 +1970,48 @@ export function Social({ initialPlatform = 'fb', lockPlatform = false }) {
         ))}
       </div>
 
-      <AnalyticsContent
-        tab={tab}
-        kpis={overviewKpis}
-        charts={overviewCharts}
-        topWindowPosts={topWindowPosts}
-        topWindowPostsLoading={topWindowPostsLoading}
-        allPosts={allPosts}
-        allPostsLoading={allPostsLoading}
-        audienceDemographics={audienceDemographics}
-        audienceDemographicsLoading={audienceDemographicsLoading}
-        selectedAccount={selectedPage}
-        engagementBreakdown={engagementBreakdown}
-        engagementBreakdownLoading={engagementBreakdownLoading}
-        reachLoading={reachLoading}
-        pageLabel={current.pageLabel}
-        period={period}
-        onPeriodChange={undefined}
-        platform={platform}
-        overviewInsights={overviewInsights}
-      />
+      <div style={{ position: 'relative' }}>
+        {(tab === 'overview' ? reachLoading
+          : tab === 'analytics' ? (topWindowPostsLoading || engagementBreakdownLoading)
+          : tab === 'posts' ? allPostsLoading
+          : false) && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14,
+            background: 'color-mix(in srgb, var(--bg) 70%, transparent)',
+            backdropFilter: 'blur(3px)',
+            borderRadius: 8,
+          }}>
+            <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+              <circle cx="40" cy="40" r="32" stroke="var(--border)" strokeWidth="5" />
+              <circle cx="40" cy="40" r="32" stroke="var(--teal)" strokeWidth="5" strokeLinecap="round" strokeDasharray="50 151" strokeDashoffset="0">
+                <animateTransform attributeName="transform" type="rotate" from="0 40 40" to="360 40 40" dur="0.75s" repeatCount="indefinite" />
+              </circle>
+            </svg>
+            <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>Loading…</span>
+          </div>
+        )}
+        <AnalyticsContent
+          tab={tab}
+          kpis={overviewKpis}
+          charts={overviewCharts}
+          topWindowPosts={topWindowPosts}
+          topWindowPostsLoading={topWindowPostsLoading}
+          allPosts={allPosts}
+          allPostsLoading={allPostsLoading}
+          audienceDemographics={audienceDemographics}
+          audienceDemographicsLoading={audienceDemographicsLoading}
+          selectedAccount={selectedPage}
+          engagementBreakdown={engagementBreakdown}
+          engagementBreakdownLoading={engagementBreakdownLoading}
+          reachLoading={reachLoading}
+          pageLabel={current.pageLabel}
+          period={period}
+          onPeriodChange={undefined}
+          platform={platform}
+          overviewInsights={overviewInsights}
+        />
+      </div>
     </div>
   )
 }
