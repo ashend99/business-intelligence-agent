@@ -9,7 +9,7 @@ import streamlit as st
 # Ensure src/ is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from agent.graph import build_agent  # noqa: E402
+from agents.graph import build_agent  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -48,6 +48,9 @@ if "agent" not in st.session_state or "thread_id" not in st.session_state:
         st.session_state.thread_id = str(uuid.uuid4())
         st.session_state.messages = []
 
+if "show_reasoning" not in st.session_state:
+    st.session_state.show_reasoning = False
+
 agent = st.session_state.agent
 thread_id: str = st.session_state.thread_id
 
@@ -72,14 +75,32 @@ if prompt := st.chat_input("Ask something about this business…"):
         with st.spinner("Thinking…"):
             try:
                 result = agent.invoke(
-                    {"messages": [{"role": "user", "content": prompt}]},
+                    {
+                        "messages": [{"role": "user", "content": prompt}],
+                        "business_key": business_key,
+                    },
                     config={"configurable": {"thread_id": thread_id}},
                 )
-                answer: str = result["messages"][-1].content
+                answer: str = result.get("final_answer") or result["messages"][-1].content
+                reasoning: list = result.get("reasoning_steps") or []
             except Exception as exc:  # noqa: BLE001
                 answer = f"⚠️ An error occurred: {exc}"
+                reasoning = []
 
         st.markdown(answer)
+
+        if st.session_state.show_reasoning and reasoning:
+            with st.expander("Reasoning steps", expanded=False):
+                for step in reasoning:
+                    if step["type"] == "intent":
+                        st.markdown(f"**Intent classified:** `{step['content']}`")
+                    elif step["type"] == "tool_call":
+                        st.markdown(f"**Tool called:** `{step['tool']}`")
+                        st.code(step.get("input", ""), language="json")
+                    elif step["type"] == "tool_result":
+                        st.markdown(f"**Result from:** `{step['tool']}`")
+                        st.code(step.get("content", ""), language="json")
+
         st.session_state.messages.append({"role": "assistant", "content": answer})
 
 # ---------------------------------------------------------------------------
@@ -89,6 +110,13 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Session")
 st.sidebar.caption(f"Business: **{business_label}**")
 st.sidebar.caption(f"Thread ID: `{thread_id[:8]}…`")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Debug")
+st.session_state.show_reasoning = st.sidebar.checkbox(
+    "Show reasoning steps",
+    value=st.session_state.show_reasoning,
+)
 
 if st.sidebar.button("🗑️ Clear conversation"):
     st.session_state.messages = []

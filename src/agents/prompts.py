@@ -15,6 +15,28 @@ from pathlib import Path
 from config.settings import settings
 
 
+def get_agent_prompt(agent_name: str, version: str | None = None) -> str:
+    """Load and return the system prompt for a named agent.
+
+    Args:
+        agent_name: One of orchestrator, rag, analytics, synthesizer, direct_response.
+        version: Prompt version string (e.g. "v1"). Defaults to the version
+                 configured in settings.agent_prompt_versions for that agent.
+
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+    """
+    resolved_version = version or settings.agent_prompt_versions.get(agent_name, "v1")
+    prompt_file = settings.prompts_dir / f"{agent_name}_{resolved_version}.txt"
+    if not prompt_file.exists():
+        raise FileNotFoundError(
+            f"Prompt file not found: {prompt_file}\n"
+            f"Create config/prompts/{agent_name}_{resolved_version}.txt "
+            f"or update agents.{agent_name}.prompt_version in config.yaml."
+        )
+    return prompt_file.read_text(encoding="utf-8")
+
+
 def get_system_prompt() -> str:
     """Load and return the active system prompt from disk.
 

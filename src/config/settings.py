@@ -65,6 +65,7 @@ class Settings:
         app = cfg.get("app", {})
         self.app_title: str = app.get("title", "Business Intelligence Agent")
         self.log_level: str = app.get("log_level", "INFO")
+        self.show_reasoning: bool = app.get("show_reasoning", False)
 
         # --- LLM ---
         llm = cfg.get("llm", {})
@@ -211,6 +212,29 @@ class Settings:
                     "include_cards": ig_posts.get("include_cards", []),
                 },
             },
+        }
+
+        # --- Per-agent model config ---
+        agents_cfg = cfg.get("agents", {})
+
+        def _ac(name: str) -> dict:
+            return agents_cfg.get(name, {})
+
+        self.orchestrator_model: str = _ac("orchestrator").get("model", "gpt-4o")
+        self.orchestrator_temperature: float = _ac("orchestrator").get("temperature", 0.0)
+        self.orchestrator_max_tokens: int = _ac("orchestrator").get("max_tokens", 1024)
+
+        self.rag_model: str = _ac("rag").get("model", "gpt-4o-mini")
+        self.rag_temperature: float = _ac("rag").get("temperature", 0.0)
+        self.rag_max_tokens: int = _ac("rag").get("max_tokens", 2048)
+
+        self.analytics_model: str = _ac("analytics").get("model", "gpt-4o-mini")
+        self.analytics_temperature: float = _ac("analytics").get("temperature", 0.0)
+        self.analytics_max_tokens: int = _ac("analytics").get("max_tokens", 2048)
+
+        self.agent_prompt_versions: dict = {
+            name: _ac(name).get("prompt_version", "v1")
+            for name in ["orchestrator", "rag", "analytics", "synthesizer", "direct_response"]
         }
 
     @staticmethod

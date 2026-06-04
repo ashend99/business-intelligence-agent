@@ -12,26 +12,38 @@ metrics:
     name: "reach"
     period: "day"
     window_days: 28
+    valid_periods: ["day"]
+    max_lookback_days: 730
   views:
     name: "views"
     period: "day"
     window_days: 28
+    valid_periods: ["day"]
+    max_lookback_days: 730
   total_interactions:
     name: "total_interactions"
     period: "day"
     window_days: 28
+    valid_periods: ["day", "week", "days_28", "month", "lifetime", "total_over_range"]
+    max_lookback_days: 730
   accounts_engaged:
     name: "accounts_engaged"
     period: "day"
     window_days: 28
+    valid_periods: ["day"]
+    max_lookback_days: 730
   follows_and_unfollows:
     name: "follows_and_unfollows"
     period: "day"
     window_days: 28
+    valid_periods: ["day", "week", "days_28", "month"]
+    max_lookback_days: 730
   profile_links_taps:
     name: "profile_links_taps"
     period: "day"
     window_days: 28
+    valid_periods: ["day", "week", "days_28", "month"]
+    max_lookback_days: 730
 
 posts:
   media_fields: "id,caption,media_type,timestamp,thumbnail_url,media_url,permalink,insights.metric(reach,total_interactions)"

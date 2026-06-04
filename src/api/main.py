@@ -19,6 +19,9 @@ import asyncio
 import sys
 import tempfile
 import logging
+import json
+import queue
+import threading
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -27,7 +30,14 @@ from pathlib import Path
 import yaml
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+# Prevent OpenBLAS startup failures on constrained environments (especially with --reload).
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 # Make src/ importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -58,6 +68,15 @@ def _load_business_keys() -> list[str]:
     with open(_BUSINESS_CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     return [b["key"] for b in cfg["business"]["businesses"]]
+
+
+def _request_runtime_context() -> dict[str, str]:
+    """Return a stable timestamp/timezone pair for a single request."""
+    now = datetime.now().astimezone()
+    return {
+        "current_datetime": now.isoformat(),
+        "current_timezone": now.tzname() or "local",
+    }
 
 
 @asynccontextmanager
@@ -1134,7 +1153,7 @@ async def get_config() -> dict:
 @app.post("/api/chat")
 async def chat(req: ChatRequest) -> dict:
     """Invoke the LangGraph agent and return the assistant reply."""
-    from agent.graph import get_agent  # local import to avoid hard dependency for non-chat endpoints
+    from agents.graph import get_agent  # local import to avoid hard dependency for non-chat endpoints
 
     _validate_key(req.business_key)
 
@@ -1142,18 +1161,90 @@ async def chat(req: ChatRequest) -> dict:
     loop = asyncio.get_event_loop()
 
     try:
+        runtime_context = _request_runtime_context()
         result = await loop.run_in_executor(
             _executor,
             lambda: agent.invoke(
-                {"messages": [{"role": "user", "content": req.message}]},
+                {
+                    "messages": [{"role": "user", "content": req.message}],
+                    "business_key": req.business_key,
+                    **runtime_context,
+                },
                 config={"configurable": {"thread_id": req.thread_id}},
             ),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    answer: str = result["messages"][-1].content
-    return {"answer": answer}
+    answer: str = result.get("final_answer") or result["messages"][-1].content
+    response: dict = {"answer": answer}
+    if settings.show_reasoning:
+        response["reasoning"] = result.get("reasoning_steps") or []
+    return response
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """Stream reasoning steps and final answer as NDJSON events."""
+    from agents.graph import get_agent  # local import to avoid hard dependency for non-chat endpoints
+
+    _validate_key(req.business_key)
+    agent = get_agent()
+
+    def _run_agent_stream(out_q: queue.Queue):
+        try:
+            runtime_context = _request_runtime_context()
+            for state in agent.stream(
+                {
+                    "messages": [{"role": "user", "content": req.message}],
+                    "business_key": req.business_key,
+                    **runtime_context,
+                },
+                config={"configurable": {"thread_id": req.thread_id}},
+                stream_mode="values",
+            ):
+                out_q.put(("state", state))
+            out_q.put(("done", None))
+        except Exception as exc:
+            out_q.put(("error", str(exc)))
+
+    async def event_generator():
+        out_q: queue.Queue = queue.Queue()
+        thread = threading.Thread(target=_run_agent_stream, args=(out_q,), daemon=True)
+        thread.start()
+
+        last_reasoning_index = 0
+        latest_state: dict = {}
+
+        while True:
+            kind, payload = await asyncio.get_event_loop().run_in_executor(_executor, out_q.get)
+
+            if kind == "state":
+                latest_state = payload or {}
+                if settings.show_reasoning:
+                    reasoning_steps = latest_state.get("reasoning_steps") or []
+                    if len(reasoning_steps) > last_reasoning_index:
+                        new_steps = reasoning_steps[last_reasoning_index:]
+                        last_reasoning_index = len(reasoning_steps)
+                        for step in new_steps:
+                            yield json.dumps({"type": "reasoning", "step": step}, ensure_ascii=True) + "\n"
+                continue
+
+            if kind == "error":
+                yield json.dumps({"type": "error", "error": payload}, ensure_ascii=True) + "\n"
+                break
+
+            if kind == "done":
+                answer = latest_state.get("final_answer")
+                if not answer and latest_state.get("messages"):
+                    answer = latest_state["messages"][-1].content
+                response = {"type": "final", "answer": answer or ""}
+                if settings.show_reasoning:
+                    response["reasoning"] = latest_state.get("reasoning_steps") or []
+                yield json.dumps(response, ensure_ascii=True) + "\n"
+                break
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 @app.get("/api/collections")

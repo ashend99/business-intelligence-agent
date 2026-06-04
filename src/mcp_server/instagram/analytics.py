@@ -193,6 +193,96 @@ def _build_metric_summary(
     }
 
 
+def _resolve_period_for_metrics(
+    metric_names: tuple[str, ...],
+    requested_period: str | None,
+    config: dict,
+) -> str:
+    """Return the period to use, auto-correcting if it violates any metric's constraints.
+
+    Computes the intersection of valid_periods across all requested metrics.
+    If the requested period is not in that intersection (or no period was given),
+    falls back to the first metric's configured default period.
+    """
+    metrics_cfg = config.get("metrics", {})
+    default_period = metrics_cfg.get(metric_names[0], {}).get("period", "day") if metric_names else "day"
+
+    valid_sets: list[set[str]] = []
+    for name in metric_names:
+        valid = metrics_cfg.get(name, {}).get("valid_periods")
+        if valid:
+            valid_sets.append(set(valid))
+
+    intersection: set[str] = valid_sets[0].intersection(*valid_sets[1:]) if valid_sets else set()
+
+    if not requested_period:
+        return default_period
+
+    if intersection and requested_period not in intersection:
+        logger.warning(
+            "Period '%s' is not valid for metrics %s (valid: %s). Using '%s'.",
+            requested_period,
+            metric_names,
+            sorted(intersection),
+            default_period,
+        )
+        return default_period
+
+    return requested_period
+
+
+def _clamp_since(
+    since: datetime | None,
+    until: datetime | None,
+    metric_names: tuple[str, ...],
+    config: dict,
+) -> datetime | None:
+    """Clamp since to the minimum allowed lookback across all requested metrics.
+
+    Returns:
+      - since unchanged if it is within the allowed range.
+      - The earliest allowed date if since is too old but still before until.
+      - None if the entire requested range is older than the lookback window,
+        so _resolve_bounds falls back to the default rolling window.
+    """
+    if since is None:
+        return None
+
+    metrics_cfg = config.get("metrics", {})
+    min_max_lookback = min(
+        int(metrics_cfg.get(name, {}).get("max_lookback_days", 730))
+        for name in metric_names
+    )
+
+    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    earliest_allowed = now - timedelta(days=min_max_lookback)
+
+    if since < earliest_allowed:
+        # If clamping since would push it past until, the whole range is out of
+        # the available window — discard both dates and use the default window.
+        if until is not None and earliest_allowed >= until:
+            logger.warning(
+                "Requested range (%s → %s) is entirely beyond max_lookback_days=%d. "
+                "Using default %d-day rolling window instead.",
+                since.date().isoformat(),
+                until.date().isoformat(),
+                min_max_lookback,
+                metrics_cfg.get(metric_names[0], {}).get("window_days", 28),
+            )
+            return None
+
+        logger.warning(
+            "since=%s exceeds max_lookback_days=%d for metrics %s. Clamping to %s.",
+            since.date().isoformat(),
+            min_max_lookback,
+            metric_names,
+            earliest_allowed.date().isoformat(),
+        )
+        return earliest_allowed
+
+    return since
+
+
 def _resolve_bounds(
     since: datetime | None,
     until: datetime | None,
@@ -291,12 +381,14 @@ async def _get_insights_by_metric_names(
 ) -> dict[str, dict]:
     if not metric_names:
         raise ValueError("Provide at least one metric name.")
-
+    print(f"Fetching insights for account ID {account_id} with metrics={metric_names}, since={since}, until={until}, period={period}, metric_type={metric_type}")
     config = _load_config()
     route_template = config.get("routing", {}).get("insights_path")
     metric_cfg = config.get("metrics", {}).get(metric_names[0], {})
-    resolved_period = period or metric_cfg.get("period", "day")
+    resolved_period = _resolve_period_for_metrics(metric_names, period, config)
     window_days = int(metric_cfg.get("window_days", 28))
+    since = _clamp_since(since, until, metric_names, config)
+    print(f"Resolved period: {resolved_period}, clamped since: {since}, window_days: {window_days}")
 
     if not route_template:
         raise ValueError("Missing routing.insights_path in src/mcp_server/instagram/config.yaml")
@@ -306,6 +398,7 @@ async def _get_insights_by_metric_names(
     account = await get_account_by_id(account_id)
     if account is None:
         raise ValueError(f"Instagram account not found: {account_id}")
+    print(f"Found Instagram account: {account.name} (ID: {account.id})")
 
     resolved_since, resolved_until = _resolve_bounds(since, until, window_days)
     insights_path = route_template.format(ig_user_id=account.id)
@@ -317,10 +410,16 @@ async def _get_insights_by_metric_names(
         "since": int(resolved_since.timestamp()),
         "until": int(resolved_until.timestamp()),
     }
+    print(f"Requesting insights with params: {request_params}")
     if metric_type is not None:
         request_params["metric_type"] = metric_type
 
-    payload = await client.get(insights_path, **request_params)
+    payload: dict[str, Any] = {}
+    try:
+        payload = await client.get(insights_path, **request_params)
+    except Exception as exc:
+        logger.warning("Error fetching insights: %s", exc)
+        print(f"Error fetching insights: {exc}")
     # print(
     #     "instagram_insights_fetch duration_ms=%s account_id=%s metrics=%s period=%s since=%s until=%s",
     #     int((time.perf_counter() - request_started_at) * 1000),

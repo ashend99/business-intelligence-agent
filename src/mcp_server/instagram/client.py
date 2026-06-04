@@ -28,7 +28,7 @@ class InstagramGraphClient(GraphClient):
         super().__init__(
             access_token=access_token,
             base_url=INSTAGRAM_GRAPH_API_BASE,
-            token_env_var="INSTAGRAM_ACCESS_TOKEN",
+            token_env_var="FACEBOOK_ACCESS_TOKEN",
         )
 
 
@@ -39,7 +39,7 @@ class InstagramBasicDisplayClient(GraphClient):
         super().__init__(
             access_token=access_token,
             base_url=INSTAGRAM_BASIC_DISPLAY_API_BASE,
-            token_env_var="INSTAGRAM_ACCESS_TOKEN",
+            token_env_var="FACEBOOK_ACCESS_TOKEN",
         )
 
 

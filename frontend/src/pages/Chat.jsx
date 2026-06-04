@@ -1,6 +1,8 @@
 // Chatbot — wired to POST /api/chat, with localStorage session persistence
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Icons } from '../components/Icons'
 import { KnowledgeBaseModal } from '../components/KnowledgeBaseModal'
 import { businessConfig } from '../config'
@@ -21,6 +23,21 @@ function persistSessions(sessions) {
 function makeSession(threadId, messages = []) {
   const title = messages.find(m => m.role === 'user')?.text?.slice(0, 48) ?? 'New chat'
   return { id: threadId, title, messages, createdAt: Date.now(), updatedAt: Date.now() }
+}
+
+function formatReasoningContent(content) {
+  if (content == null) return ''
+  if (typeof content === 'string') return content
+  try {
+    return JSON.stringify(content, null, 2)
+  } catch {
+    return String(content)
+  }
+}
+
+function appendReasoningStep(message, step) {
+  const current = Array.isArray(message.reasoning) ? message.reasoning : []
+  return { ...message, reasoning: [...current, step] }
 }
 
 // HistoryPanel — sidebar showing saved sessions
@@ -199,33 +216,101 @@ export function Chat({ onNavigate }) {
       saveThread(threadId, next)
       return next
     })
+
+    const aiMessageId = crypto.randomUUID()
+    setThread(t => {
+      const next = [...t, { id: aiMessageId, role: 'ai', text: '', reasoning: [], streaming: true, ts: Date.now() }]
+      saveThread(threadId, next)
+      return next
+    })
+
+    const updateAiMessage = updater => {
+      setThread(t => {
+        const next = t.map(msg => (msg.id === aiMessageId ? updater(msg) : msg))
+        saveThread(threadId, next)
+        return next
+      })
+    }
+
     setThinking(true)
     try {
-      const res = await fetch('http://localhost:8000/api/chat', {
+      const res = await fetch('http://localhost:8000/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ business_key: businessKey, thread_id: threadId, message: text }),
       })
-      let aiMsg
       if (!res.ok) {
         const err = await res.text()
-        aiMsg = { role: 'ai', text: `Error: ${err}`, isError: true, ts: Date.now() }
+        updateAiMessage(msg => ({ ...msg, text: `Error: ${err}`, isError: true, streaming: false }))
+      } else if (!res.body) {
+        updateAiMessage(msg => ({ ...msg, text: 'Error: Stream body not available', isError: true, streaming: false }))
       } else {
-        const data = await res.json()
-        aiMsg = { role: 'ai', text: data.answer, ts: Date.now() }
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed) continue
+
+            let evt
+            try {
+              evt = JSON.parse(trimmed)
+            } catch {
+              continue
+            }
+
+            if (evt.type === 'reasoning') {
+              updateAiMessage(msg => appendReasoningStep(msg, evt.step))
+            } else if (evt.type === 'final') {
+              updateAiMessage(msg => ({
+                ...msg,
+                text: evt.answer || '',
+                reasoning: Array.isArray(evt.reasoning) ? evt.reasoning : (msg.reasoning || []),
+                streaming: false,
+              }))
+            } else if (evt.type === 'error') {
+              updateAiMessage(msg => ({
+                ...msg,
+                text: `Error: ${evt.error || 'Unknown error'}`,
+                isError: true,
+                streaming: false,
+              }))
+            }
+          }
+        }
+
+        // Flush any final buffered event fragment if newline was omitted.
+        const tail = buffer.trim()
+        if (tail) {
+          try {
+            const evt = JSON.parse(tail)
+            if (evt.type === 'final') {
+              updateAiMessage(msg => ({
+                ...msg,
+                text: evt.answer || '',
+                reasoning: Array.isArray(evt.reasoning) ? evt.reasoning : (msg.reasoning || []),
+                streaming: false,
+              }))
+            }
+          } catch {
+            // Ignore malformed tail.
+          }
+        }
+
+        // Ensure streaming state ends even when no explicit final event arrives.
+        updateAiMessage(msg => ({ ...msg, streaming: false }))
       }
-      setThread(t => {
-        const next = [...t, aiMsg]
-        saveThread(threadId, next)
-        return next
-      })
     } catch (e) {
-      const aiMsg = { role: 'ai', text: `Network error: ${e.message}`, isError: true, ts: Date.now() }
-      setThread(t => {
-        const next = [...t, aiMsg]
-        saveThread(threadId, next)
-        return next
-      })
+      updateAiMessage(msg => ({ ...msg, text: `Network error: ${e.message}`, isError: true, streaming: false }))
     } finally {
       setThinking(false)
     }
@@ -285,14 +370,67 @@ export function Chat({ onNavigate }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 600 }}>Nexus</span>
                 </div>
+                {!!m.reasoning?.length && (
+                  <details style={{ marginTop: 8 }}>
+                    <summary style={{ fontSize: 11, color: 'var(--text-3)', cursor: 'pointer', userSelect: 'none' }}>
+                      Reasoning and tools ({m.reasoning.length})
+                    </summary>
+                    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {m.reasoning.map((step, idx) => (
+                        <div
+                          key={`${m.ts ?? i}-${idx}`}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid var(--border)',
+                            borderRadius: 6,
+                            background: 'var(--panel-2)',
+                          }}
+                        >
+                          <div className="mono" style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>
+                            {step.type || 'step'}{step.tool ? ` · ${step.tool}` : ''}
+                          </div>
+                          <div style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                            {formatReasoningContent(step.content ?? step.input ?? step)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
                 <div style={{
                   padding: '12px 14px', background: 'var(--panel)',
                   border: '1px solid var(--border)',
                   borderLeft: `2px solid ${m.isError ? 'var(--coral)' : 'var(--teal)'}`,
-                  borderRadius: 8, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap',
+                  borderRadius: 8, fontSize: 13, lineHeight: 1.7,
                   color: m.isError ? 'var(--coral)' : undefined,
+                  marginTop: m.reasoning?.length ? 8 : 0,
                 }}>
-                  {m.text}
+                  {m.streaming && !m.text
+                    ? <span style={{ color: 'var(--text-3)' }}>Streaming response…</span>
+                    : <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{children}</p>,
+                          table: ({ children }) => (
+                            <div style={{ overflowX: 'auto', margin: '8px 0' }}>
+                              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>{children}</table>
+                            </div>
+                          ),
+                          th: ({ children }) => (
+                            <th style={{ border: '1px solid var(--border)', padding: '6px 10px', background: 'var(--panel-2)', textAlign: 'left', fontWeight: 600 }}>{children}</th>
+                          ),
+                          td: ({ children }) => (
+                            <td style={{ border: '1px solid var(--border)', padding: '6px 10px' }}>{children}</td>
+                          ),
+                          strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
+                          ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ul>,
+                          li: ({ children }) => <li style={{ margin: '2px 0' }}>{children}</li>,
+                          code: ({ children }) => <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--panel-2)', padding: '1px 4px', borderRadius: 3 }}>{children}</code>,
+                        }}
+                      >
+                        {m.text}
+                      </ReactMarkdown>
+                  }
                 </div>
               </div>
             </div>
