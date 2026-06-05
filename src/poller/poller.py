@@ -9,6 +9,7 @@ Account order: primary (index 0) first so the default dashboard view
 is ready before the remaining accounts are processed.
 """
 
+import sys
 import asyncio
 import logging
 import time
@@ -231,3 +232,15 @@ async def start_poller() -> None:
         await asyncio.sleep(_INTERVAL_SECONDS)
         logger.info("poller: scheduled interval reached, running poll")
         await _poll()
+
+
+# ---------------------------------------------------------------------------
+# Standalone warm-up — run once and exit
+# Usage:  python -m src.poller.poller
+#         (or as a Docker/k8s init step before starting the app server)
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    logger.info("poller: standalone warm-up starting")
+    asyncio.run(_poll())
+    logger.info("poller: standalone warm-up done — cache is ready")

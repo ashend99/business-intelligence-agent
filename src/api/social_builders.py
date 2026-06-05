@@ -136,9 +136,10 @@ async def build_engagement_breakdown(
         "account_id": account_id,
         "link_to_window": bool(link_to_window),
         "window_days": int(window_days),
+        **current_payload,
+        # Override since/until from the API response — it returns the +1 day query boundary, not the display date
         "since": since if link_to_window else (default_since_date.isoformat() if default_since_date else None),
         "until": until if link_to_window else (default_until_date.isoformat() if default_until_date else None),
-        **current_payload,
         "previous_breakdown": prev_breakdown,
         "previous_total_interactions": int(prev_total),
     }

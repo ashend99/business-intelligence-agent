@@ -40,6 +40,62 @@
   --mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
+/* --- Dark theme ------------------------------------------ */
+[data-theme="dark"] {
+  --text:    #e8e8e8;
+  --text-2:  #aaaaaa;
+  --text-3:  #666666;
+  --text-4:  #444444;
+  --border:  #2a2a2a;
+  --bg:      #111111;
+  --bg-2:    #1a1a1a;
+  --panel:   #1e1e1e;
+  --panel-2: #252525;
+  --panel-3: #303030;
+}
+
+/* --- Midnight theme -------------------------------------- */
+[data-theme="midnight"] {
+  --text:    #e2e8f5;
+  --text-2:  #8fa3c8;
+  --text-3:  #566080;
+  --text-4:  #3a4560;
+  --border:  #1e2a40;
+  --bg:      #0b0f1a;
+  --bg-2:    #0f1525;
+  --panel:   #141c2e;
+  --panel-2: #1a2338;
+  --panel-3: #213050;
+}
+
+/* --- Ocean theme ----------------------------------------- */
+[data-theme="ocean"] {
+  --text:    #e0f0f5;
+  --text-2:  #7ab8cc;
+  --text-3:  #4a8099;
+  --text-4:  #2a5566;
+  --border:  #1a3d50;
+  --bg:      #071520;
+  --bg-2:    #0c1e2e;
+  --panel:   #102535;
+  --panel-2: #143040;
+  --panel-3: #1c3d50;
+}
+
+/* --- Sunset theme ---------------------------------------- */
+[data-theme="sunset"] {
+  --text:    #2a1a0a;
+  --text-2:  #5c3a1e;
+  --text-3:  #8a5c3a;
+  --text-4:  #b88050;
+  --border:  #e8d0b0;
+  --bg:      #fdf5e8;
+  --bg-2:    #f8ead8;
+  --panel:   #ffffff;
+  --panel-2: #fdf0e0;
+  --panel-3: #f0dfc0;
+}
+
 /* --- Reset ----------------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }

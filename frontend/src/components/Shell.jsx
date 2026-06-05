@@ -1,7 +1,81 @@
 // Shell — exact port of nexus/shell.jsx + nexus/app.jsx layout
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Icons } from './Icons'
+
+const THEME_META = [
+  { id: 'light',    label: 'Light',    swatches: ['#f5f5f5', '#ffffff', '#6C63FF'] },
+  { id: 'dark',     label: 'Dark',     swatches: ['#111111', '#1e1e1e', '#6C63FF'] },
+  { id: 'midnight', label: 'Midnight', swatches: ['#0b0f1a', '#141c2e', '#4A8CFF'] },
+  { id: 'ocean',    label: 'Ocean',    swatches: ['#071520', '#102535', '#00C9A7'] },
+  { id: 'sunset',   label: 'Sunset',   swatches: ['#fdf5e8', '#ffffff', '#F5A623'] },
+]
+
+function ThemePicker({ theme, onThemeChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const current = THEME_META.find(t => t.id === theme) || THEME_META[0]
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="btn ghost icon"
+        title={`Theme: ${current.label}`}
+        onClick={() => setOpen(o => !o)}
+        style={{ background: open ? 'var(--indigo-soft)' : 'transparent', outline: open ? '1px solid var(--indigo)' : 'none', borderRadius: 7 }}
+      >
+        {/* Half-moon: left half dark, right half light — always visible on any theme */}
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <clipPath id="left-half"><rect x="0" y="0" width="8" height="16" /></clipPath>
+          <clipPath id="right-half"><rect x="8" y="0" width="8" height="16" /></clipPath>
+          <circle cx="8" cy="8" r="6.5" fill="#1a1a2e" clipPath="url(#left-half)" />
+          <circle cx="8" cy="8" r="6.5" fill="#f0f0f0" clipPath="url(#right-half)" />
+          <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--border)" strokeWidth="1.2" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="panel" style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 160,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.14)', zIndex: 200, padding: 6,
+        }}>
+          <div className="label" style={{ padding: '4px 8px 6px' }}>Theme</div>
+          {THEME_META.map(t => (
+            <button
+              key={t.id}
+              onClick={() => { onThemeChange(t.id); setOpen(false) }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                padding: '7px 8px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                background: t.id === theme ? 'var(--indigo-soft)' : 'transparent',
+                color: t.id === theme ? 'var(--indigo)' : 'var(--text-2)',
+                fontWeight: t.id === theme ? 600 : 400,
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={e => { if (t.id !== theme) e.currentTarget.style.background = 'var(--bg-2)' }}
+              onMouseLeave={e => { if (t.id !== theme) e.currentTarget.style.background = 'transparent' }}
+            >
+              <span style={{ display: 'flex', gap: 3 }}>
+                {t.swatches.map((s, i) => (
+                  <span key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: s, border: '1px solid var(--border)', display: 'inline-block' }} />
+                ))}
+              </span>
+              {t.label}
+              {t.id === theme && <Icons.Check size={12} style={{ marginLeft: 'auto' }} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const NAV = [
   { id: 'home',      label: 'Home',      icon: 'Home'    },
@@ -112,7 +186,7 @@ function Sidebar({ active, onSelect, collapsed, onToggle, businessGroup }) {
 // ---------------------------------------------------------------------------
 // TopBar — exact copy of nexus/shell.jsx TopBar
 // ---------------------------------------------------------------------------
-function TopBar({ title, breadcrumb, onToggleCtx, ctxOpen, onOpenCmd }) {
+function TopBar({ title, breadcrumb, onToggleCtx, ctxOpen, onOpenCmd, theme, onThemeChange }) {
   return (
     <div style={{ height: 48, flex: '0 0 48px', borderBottom: '1px solid var(--border)', background: 'var(--bg)', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -131,6 +205,7 @@ function TopBar({ title, breadcrumb, onToggleCtx, ctxOpen, onOpenCmd }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <AgentChip count={3} />
+        <ThemePicker theme={theme} onThemeChange={onThemeChange} />
         <button className="btn ghost icon" title="Notifications" style={{ position: 'relative' }}>
           <Icons.Bell size={14} />
           <span style={{ position: 'absolute', top: 4, right: 4, width: 6, height: 6, borderRadius: 3, background: 'var(--coral)' }} />
@@ -260,7 +335,7 @@ function CommandPalette({ open, onClose, onNavigate }) {
 // ---------------------------------------------------------------------------
 // Shell — root layout from nexus/app.jsx
 // ---------------------------------------------------------------------------
-export function Shell({ page, onNavigate, children, businessGroup }) {
+export function Shell({ page, onNavigate, children, businessGroup, theme, onThemeChange }) {
   const [collapsed, setCollapsed] = useState(false)
   const [ctxOpen,   setCtxOpen]   = useState(false)
   const [cmdOpen,   setCmdOpen]   = useState(false)
@@ -293,6 +368,8 @@ export function Shell({ page, onNavigate, children, businessGroup }) {
             onToggleCtx={() => setCtxOpen(o => !o)}
             ctxOpen={ctxOpen}
             onOpenCmd={() => setCmdOpen(true)}
+            theme={theme}
+            onThemeChange={onThemeChange}
           />
           <div className="scroll-y" style={{ flex: 1, minHeight: 0 }}>
             {children}
