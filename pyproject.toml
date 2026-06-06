@@ -42,6 +42,10 @@ dependencies = [
     "langchain-mcp-adapters>=0.1",
     "langgraph-checkpoint-sqlite>=2.0",
     "filelock>=3.12",
+    # Google Calendar integration
+    "google-auth-oauthlib>=1.2",
+    "google-api-python-client>=2.100",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

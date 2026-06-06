@@ -60,6 +60,7 @@ from api.social_builders import (  # noqa: E402
 from poller import cache_store  # noqa: E402
 from poller.poller import start_poller  # noqa: E402
 from config.settings import settings  # noqa: E402
+from gcalendar.routes import router as calendar_router  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logging.getLogger().setLevel(logging.DEBUG)
@@ -130,6 +131,8 @@ app.add_middleware(
 )
 
 _executor = ThreadPoolExecutor(max_workers=4)
+
+app.include_router(calendar_router)
 
 
 # ---------------------------------------------------------------------------

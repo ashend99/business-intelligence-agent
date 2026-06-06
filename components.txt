@@ -1,5 +1,7 @@
-1. Overview 
-2. Chat (Quick/session)
+1. Home/Overview 
+2. ChatBot
 3. Sales
 4. Social Media
 5. Team
+6. Alerts/Notifications
+7. Calendar

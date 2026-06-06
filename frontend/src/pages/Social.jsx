@@ -307,7 +307,7 @@ const _shiftIsoDate = (isoDate, days) => {
 // ---------------------------------------------------------------------------
 // Local components
 // ---------------------------------------------------------------------------
-function Section({ title, subtitle, right, children, style }) {
+function Section({ title, subtitle, right, children, style, description }) {
   return (
     <div className="panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', ...style }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -315,7 +315,30 @@ function Section({ title, subtitle, right, children, style }) {
           <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
           {subtitle && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{subtitle}</div>}
         </div>
-        {right}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {description && (
+            <button
+              type="button"
+              aria-label={`${title} info`}
+              title={description}
+              style={{
+                width: 20,
+                height: 20,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--text-3)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                cursor: 'pointer',
+              }}
+            >
+              <Icons.Info size={13} />
+            </button>
+          )}
+          {right}
+        </div>
       </div>
       {children}
     </div>
@@ -531,11 +554,34 @@ function ReachCard({ metric, loading }) {
   )
 }
 
-function SnapshotMetricCard({ label, value, unavailable = false, loading = false }) {
+function SnapshotMetricCard({ label, value, unavailable = false, loading = false, description }) {
   const display = unavailable ? '—' : (value ?? '0')
   return (
     <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minWidth: 0, opacity: loading ? 0.6 : 1 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>{label}</span>
+        {description && (
+          <button
+            type="button"
+            aria-label={`${label} info`}
+            title={description}
+            style={{
+              width: 20,
+              height: 20,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--text-3)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              cursor: 'pointer',
+            }}
+          >
+            <Icons.Info size={13} />
+          </button>
+        )}
+      </div>
       <div style={{ marginTop: 8, fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', color: loading ? 'var(--text-3)' : (unavailable ? 'var(--text-3)' : 'var(--text)') }}>
         {loading ? '···' : display}
       </div>
@@ -659,6 +705,7 @@ function AnalyticsContent({
     label,
     value: metric?.value ?? null,
     unavailable: metric?.value === null || metric?.value === undefined,
+    description: metric?.description ?? null,
   })
 
   const overviewSecondRow = useMemo(() => {
@@ -932,9 +979,9 @@ function AnalyticsContent({
       const postsRaw = accountProfile?.media_count
 
       return [
-        { key: 'followers', label: 'Followers', value: formatOrNull(followersRaw), unavailable: !Number.isFinite(Number(followersRaw)) },
-        { key: 'following', label: 'Following', value: formatOrNull(followingRaw), unavailable: !Number.isFinite(Number(followingRaw)) },
-        { key: 'posts', label: 'Posts', value: formatOrNull(postsRaw), unavailable: !Number.isFinite(Number(postsRaw)) },
+        { key: 'followers', label: 'Followers', value: formatOrNull(followersRaw), unavailable: !Number.isFinite(Number(followersRaw)), description: 'Total number of accounts that follow your Instagram profile.' },
+        { key: 'following', label: 'Following', value: formatOrNull(followingRaw), unavailable: !Number.isFinite(Number(followingRaw)), description: 'Total number of accounts your Instagram profile follows.' },
+        { key: 'posts', label: 'Posts', value: formatOrNull(postsRaw), unavailable: !Number.isFinite(Number(postsRaw)), description: 'Total number of posts (photos, videos, reels, and carousels) published on your profile.' },
       ]
     }
 
@@ -943,9 +990,9 @@ function AnalyticsContent({
     const postsRaw = accountProfile?.media_count ?? overviewPostsCount?.total_count
 
     return [
-      { key: 'followers', label: 'Followers', value: formatOrNull(followersRaw), unavailable: !Number.isFinite(Number(followersRaw)) },
-      { key: 'page_likes', label: 'Page Likes', value: formatOrNull(likesRaw), unavailable: !Number.isFinite(Number(likesRaw)) },
-      { key: 'posts', label: 'Posts', value: formatOrNull(postsRaw), unavailable: !Number.isFinite(Number(postsRaw)) },
+      { key: 'followers', label: 'Followers', value: formatOrNull(followersRaw), unavailable: !Number.isFinite(Number(followersRaw)), description: 'Total number of people who follow your Facebook Page.' },
+      { key: 'page_likes', label: 'Page Likes', value: formatOrNull(likesRaw), unavailable: !Number.isFinite(Number(likesRaw)), description: 'Total number of people who have liked your Facebook Page.' },
+      { key: 'posts', label: 'Posts', value: formatOrNull(postsRaw), unavailable: !Number.isFinite(Number(postsRaw)), description: 'Total number of posts published on your Facebook Page.' },
     ]
   }, [kpis, overviewPostsCount, platform])
 
@@ -968,6 +1015,7 @@ function AnalyticsContent({
                 label={metric.label}
                 value={metric.value}
                 unavailable={metric.unavailable}
+                description={metric.description}
               />
             ))}
           </div>
@@ -978,12 +1026,13 @@ function AnalyticsContent({
                 label={metric.label}
                 value={metric.value}
                 unavailable={metric.unavailable}
+                description={metric.description}
               />
             ))}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: platform === 'ig' ? 'repeat(3, minmax(0, 1fr))' : 'repeat(1, minmax(0, 1fr))', gap: 14 }}>
-            <Section title="Performance Overview" subtitle="Daily reach for last 30 days" style={{ padding: 16 }}>
+            <Section title="Performance Overview" subtitle="Daily reach for last 30 days" style={{ padding: 16 }} description="A day-by-day chart of how many unique accounts your content reached over the selected time window.">
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                 {/* <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)' }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4A8CFF' }} />Reach
@@ -1001,7 +1050,7 @@ function AnalyticsContent({
             </Section>
 
             {platform === 'ig' && (
-            <Section title="Posts Breakdown" subtitle="lifetime" style={{ padding: 16 }}>
+            <Section title="Posts Breakdown" subtitle="lifetime" style={{ padding: 16 }} description="Distribution of your all-time posts by content type: Reels, Videos, Carousels, and Images.">
               {allPostsLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading posts breakdown...</div>
               ) : (
@@ -1036,7 +1085,7 @@ function AnalyticsContent({
             )}
 
             {platform === 'ig' && (
-            <Section title="Engagement Breakdown" subtitle="last 30 days" style={{ padding: 16 }}>
+            <Section title="Engagement Breakdown" subtitle="last 30 days" style={{ padding: 16 }} description="Breakdown of total interactions (likes, comments, saves, shares, reposts, replies) across your posts in the last 30 days.">
               {engagementBreakdownLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading engagement breakdown...</div>
               ) : (
@@ -1074,7 +1123,7 @@ function AnalyticsContent({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14 }}>
 
             {/* Age Distribution donut */}
-            <Section title="Age Distribution" subtitle="this month " style={{ padding: 16 }}>
+            <Section title="Age Distribution" subtitle="this month " style={{ padding: 16 }} description="Breakdown of your audience by age group, based on follower demographic data for the current month.">
               {audienceDemographicsLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading…</div>
               ) : ageDonutData.rows.length === 0 ? (
@@ -1103,7 +1152,7 @@ function AnalyticsContent({
             </Section>
 
             {/* Top Countries donut */}
-            <Section title="Top Countries" subtitle="this month " style={{ padding: 16 }}>
+            <Section title="Top Countries" subtitle="this month " style={{ padding: 16 }} description="Geographic distribution of your audience, showing which countries your followers are located in this month.">
               {audienceDemographicsLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading…</div>
               ) : countryDonutData.rows.length === 0 ? (
@@ -1132,7 +1181,7 @@ function AnalyticsContent({
             </Section>
 
             {/* Gender Split donut */}
-            <Section title="Gender Split" subtitle="this month " style={{ padding: 16 }}>
+            <Section title="Gender Split" subtitle="this month " style={{ padding: 16 }} description="Proportion of your audience by gender (Female, Male, Unknown), based on follower demographic data for the current month.">
               {audienceDemographicsLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading…</div>
               ) : genderDonutData.rows.length === 0 ? (
@@ -1161,7 +1210,7 @@ function AnalyticsContent({
             </Section>
 
             {/* Gender by Age group — custom dual-bar chart */}
-            <Section title="Gender by Age Group" subtitle="this month " style={{ padding: 16 }}>
+            <Section title="Gender by Age Group" subtitle="this month " style={{ padding: 16 }} description="Side-by-side female and male audience counts for each age group, showing how gender distribution varies across age brackets.">
               {audienceDemographicsLoading ? (
                 <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading…</div>
               ) : ageGenderData.every(g => g.female === 0 && g.male === 0) ? (

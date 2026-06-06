@@ -61,6 +61,15 @@ class Settings:
         # Optional — social features are disabled gracefully when not set
         self.facebook_access_token: str | None = os.getenv("FACEBOOK_ACCESS_TOKEN") or None
 
+        # --- Google Calendar (optional — calendar features disabled when not set) ---
+        self.google_client_id: str | None = os.getenv("GOOGLE_CLIENT_ID") or None
+        self.google_client_secret: str | None = os.getenv("GOOGLE_CLIENT_SECRET") or None
+        self.google_redirect_uri: str = (
+            os.getenv("GOOGLE_REDIRECT_URI")
+            or "http://localhost:8000/api/calendar/accounts/callback"
+        )
+        self.calendar_encryption_key: str | None = os.getenv("CALENDAR_TOKEN_ENCRYPTION_KEY") or None
+
         # --- App ---
         app = cfg.get("app", {})
         self.app_title: str = app.get("title", "Business Intelligence Agent")

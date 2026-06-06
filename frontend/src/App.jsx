@@ -4,6 +4,7 @@ import { Home } from './pages/Home'
 import { Chat } from './pages/Chat'
 import { Documents } from './pages/Documents'
 import { Social } from './pages/Social'
+import { Calendar } from './pages/Calendar'
 import { businessConfig } from './config'
 
 const APP_PAGE_STORAGE_KEY = 'bi.app.activePage'
@@ -15,6 +16,7 @@ const PAGES = {
   chat: Chat,
   documents: Documents,
   social: Social,
+  calendar: Calendar,
 }
 
 export default function App() {

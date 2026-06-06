@@ -78,10 +78,11 @@ function ThemePicker({ theme, onThemeChange }) {
 }
 
 const NAV = [
-  { id: 'home',      label: 'Home',      icon: 'Home'    },
-  { id: 'chat',      label: 'Chatbot',   icon: 'Chatbot' },
-  { id: 'documents', label: 'Documents', icon: 'Doc'     },
-  { id: 'social',    label: 'Social',    icon: 'Social'  },
+  { id: 'home',      label: 'Home',      icon: 'Home'     },
+  { id: 'chat',      label: 'Chatbot',   icon: 'Chatbot'  },
+  { id: 'documents', label: 'Documents', icon: 'Doc'      },
+  { id: 'social',    label: 'Social',    icon: 'Social'   },
+  { id: 'calendar',  label: 'Calendar',  icon: 'Calendar' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -345,6 +346,7 @@ export function Shell({ page, onNavigate, children, businessGroup, theme, onThem
     chat:      { title: 'Chatbot',   breadcrumb: 'AI Assistant' },
     documents: { title: 'Documents', breadcrumb: 'Knowledge base' },
     social:    { title: 'Social',    breadcrumb: 'Platform Analytics' },
+    calendar:  { title: 'Calendar',  breadcrumb: 'Manage Events' },
   }
   const P = PAGES[page] || PAGES.home
 

@@ -1,3 +1,15 @@
+google_calendars:
+  # - name: "LUSTER Cafe & Restaurant"
+  #   email: "luster@gmail.com"
+  # - name: "SOLARSTAY Airport Hotel"
+  #   email: "solarstay@gmail.com"
+  # - name: "SOLAR GEMS Jewelry"
+  #   email: "solargems@gmail.com"
+  - name: "Lumina"
+    email: "inquirelumina@gmail.com"
+  - name: "Ashen Dulanjana"
+    email: "ashendulanjana99@gmail.com"
+
 business:
   group: "SOLAR HUB"
   businesses:
